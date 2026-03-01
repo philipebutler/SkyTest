@@ -16,6 +16,8 @@ export interface ExportContent {
   markdown: string;
   /** Raw JSON serialization of the Run record (pretty-printed). */
   json: string;
+  /** JUnit XML report compatible with CI systems (Issue #24). */
+  junit: string;
 }
 
 export class RunExporter {
@@ -26,6 +28,7 @@ export class RunExporter {
     return {
       markdown: this.toMarkdown(run),
       json: JSON.stringify(run, null, 2),
+      junit: this.toJUnit(run),
     };
   }
 
@@ -121,5 +124,78 @@ export class RunExporter {
     return [
       `- **${artifact.type}**${stepNote} · ID: \`${artifact.id}\` · Path: \`${artifact.path}\``,
     ];
+  }
+
+  /**
+   * Produce a JUnit XML report compatible with CI systems (Issue #24).
+   *
+   * Each step and assertion becomes a <testcase>. Failed steps/assertions
+   * include a <failure> element. The total time is derived from the run
+   * duration in seconds (or 0 when finishedAt is absent).
+   */
+  private toJUnit(run: Run): string {
+    const durationSec = run.finishedAt
+      ? ((new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) / 1000).toFixed(3)
+      : "0.000";
+
+    const testCases: string[] = [];
+
+    for (const step of run.stepResults) {
+      const name = this.xmlEsc(`step ${step.stepIndex}: ${step.action}`);
+      const timeSec = (step.durationMs / 1000).toFixed(3);
+      const cls = this.xmlEsc(run.id);
+      if (step.status === "failed") {
+        const msg = this.xmlEsc(step.error ?? "step failed");
+        testCases.push(
+          `    <testcase name="${name}" classname="${cls}" time="${timeSec}">\n` +
+          `      <failure message="${msg}" type="AssertionError">${msg}</failure>\n` +
+          `    </testcase>`
+        );
+      } else {
+        testCases.push(`    <testcase name="${name}" classname="${cls}" time="${timeSec}"/>`);
+      }
+    }
+
+    for (const assertion of run.assertionResults ?? []) {
+      const name = this.xmlEsc(`assertion ${assertion.assertionIndex}: ${assertion.type}`);
+      const cls = this.xmlEsc(run.id);
+      if (assertion.status === "failed") {
+        const msg = this.xmlEsc(assertion.error ?? "assertion failed");
+        testCases.push(
+          `    <testcase name="${name}" classname="${cls}" time="0.000">\n` +
+          `      <failure message="${msg}" type="AssertionError">${msg}</failure>\n` +
+          `    </testcase>`
+        );
+      } else {
+        testCases.push(`    <testcase name="${name}" classname="${cls}" time="0.000"/>`);
+      }
+    }
+
+    const totalTests = testCases.length;
+    const totalFailures = (run.stepResults.filter((s) => s.status === "failed").length) +
+      ((run.assertionResults ?? []).filter((a) => a.status === "failed").length);
+    const suiteId = this.xmlEsc(run.id);
+    const timestamp = this.xmlEsc(run.startedAt);
+
+    const lines: string[] = [
+      `<?xml version="1.0" encoding="UTF-8"?>`,
+      `<testsuites name="SkyTest" tests="${totalTests}" failures="${totalFailures}" errors="0" time="${durationSec}">`,
+      `  <testsuite name="${suiteId}" tests="${totalTests}" failures="${totalFailures}" errors="0" time="${durationSec}" timestamp="${timestamp}">`,
+      ...testCases,
+      `  </testsuite>`,
+      `</testsuites>`,
+    ];
+
+    return lines.join("\n");
+  }
+
+  /** Escape special XML characters in attribute values and text content. */
+  private xmlEsc(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
   }
 }

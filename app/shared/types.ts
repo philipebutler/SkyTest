@@ -184,6 +184,8 @@ export interface RunConfig {
   retryCount?: number;
   /** Whether to retry per step or per test (Issue #23). */
   retryMode?: "step" | "test";
+  /** Output format for CI-compatible export (Issue #24). */
+  outputFormat?: "junit" | "json";
 }
 
 export interface SaveTestPayload {

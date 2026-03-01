@@ -88,6 +88,8 @@ export interface TestCase {
   preconditions: ActionStep[];
   steps: ActionStep[];
   assertions: Assertion[];
+  /** Browser used when this test was last saved/run (Issue #9). */
+  browser?: BrowserType;
   createdAt: string;
   updatedAt: string;
 }
@@ -141,6 +143,8 @@ export interface SaveTestPayload {
   name: string;
   /** Raw chat transcript captured as steps */
   steps: ActionStep[];
+  /** Browser that was active when the test was saved (Issue #9). */
+  browser?: BrowserType;
 }
 
 // Typed IPC contracts (SPEC §6.1)

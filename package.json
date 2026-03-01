@@ -11,6 +11,8 @@
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "webpack --config webpack.main.config.js --mode production",
     "build:renderer": "webpack --config webpack.renderer.config.js --mode production",
+    "build:ci": "webpack --config webpack.ci.config.js --mode production",
+    "ci:run": "node dist/ci/ci-runner.js",
     "typecheck": "tsc --noEmit",
     "test": "jest"
   },

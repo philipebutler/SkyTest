@@ -43,7 +43,8 @@ export class PlaywrightExecutor {
     storageStatePath?: string,
     assertions?: Assertion[],
     retryCount?: number,
-    retryMode?: "step" | "test"
+    retryMode?: "step" | "test",
+    runId?: string
   ): Promise<ExecutionResult> {
     const launcher = this.getLauncher(browser);
     const browserInstance: Browser = await launcher.launch({ headless: !headed });
@@ -67,7 +68,8 @@ export class PlaywrightExecutor {
         plan,
         artifactsDir,
         artifacts,
-        maxRetries
+        maxRetries,
+        runId
       ));
     } else {
       ({ stepResults, artifacts } = await this.executeWithStepRetry(
@@ -75,7 +77,8 @@ export class PlaywrightExecutor {
         plan,
         artifactsDir,
         artifacts,
-        maxRetries
+        maxRetries,
+        runId
       ));
     }
 
@@ -113,13 +116,14 @@ export class PlaywrightExecutor {
     plan: DSLPlan,
     artifactsDir: string,
     artifacts: Artifact[],
-    maxRetries: number
+    maxRetries: number,
+    runId?: string
   ): Promise<{ stepResults: StepResult[]; artifacts: Artifact[] }> {
     const stepResults: StepResult[] = [];
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
-      const result = await this.executeStepWithRetry(page, step, i, artifactsDir, artifacts, maxRetries);
+      const result = await this.executeStepWithRetry(page, step, i, artifactsDir, artifacts, maxRetries, runId);
       stepResults.push(result);
       if (result.status === "failed") {
         break;
@@ -139,7 +143,8 @@ export class PlaywrightExecutor {
     plan: DSLPlan,
     artifactsDir: string,
     artifacts: Artifact[],
-    maxRetries: number
+    maxRetries: number,
+    runId?: string
   ): Promise<{ stepResults: StepResult[]; artifacts: Artifact[] }> {
     let stepResults: StepResult[] = [];
     let testAttempt = 1;
@@ -156,7 +161,7 @@ export class PlaywrightExecutor {
       for (let i = 0; i < plan.steps.length; i++) {
         const step = plan.steps[i];
         const start = Date.now();
-        const result = await this.executeStep(page, step, i, artifactsDir, artifacts, testAttempt);
+        const result = await this.executeStep(page, step, i, artifactsDir, artifacts, testAttempt, runId);
         result.durationMs = Date.now() - start;
         stepResults.push(result);
         if (result.status === "failed") {
@@ -184,7 +189,8 @@ export class PlaywrightExecutor {
     stepIndex: number,
     artifactsDir: string,
     artifacts: Artifact[],
-    maxRetries: number
+    maxRetries: number,
+    runId?: string
   ): Promise<StepResult> {
     const totalAttempts = maxRetries + 1;
     const retryAttempts: RetryAttempt[] = [];
@@ -199,7 +205,7 @@ export class PlaywrightExecutor {
         );
       }
       const start = Date.now();
-      const result = await this.executeStep(page, step, stepIndex, artifactsDir, artifacts);
+      const result = await this.executeStep(page, step, stepIndex, artifactsDir, artifacts, undefined, runId);
       result.durationMs = Date.now() - start;
       lastResult = result;
 
@@ -230,7 +236,8 @@ export class PlaywrightExecutor {
     stepIndex: number,
     artifactsDir: string,
     artifacts: Artifact[],
-    testAttempt?: number
+    testAttempt?: number,
+    runId?: string
   ): Promise<StepResult> {
     const result: StepResult = {
       stepIndex,
@@ -241,13 +248,17 @@ export class PlaywrightExecutor {
     };
 
     try {
-      await this.runAction(page, step, stepIndex, artifactsDir, artifacts);
+      await this.runAction(page, step, stepIndex, artifactsDir, artifacts, runId);
     } catch (err) {
       result.status = "failed";
       result.error = err instanceof Error ? err.message : String(err);
       // Capture a screenshot on failure for diagnostics (SPEC §10.1)
       const attemptTag = testAttempt !== undefined ? `-attempt${testAttempt}` : "";
-      const screenshotId = `artifact-${Date.now()}-${stepIndex}${attemptTag}`;
+      // Use deterministic naming when a runId is supplied (Issue #24); otherwise
+      // fall back to timestamp-based naming to preserve backward compatibility.
+      const screenshotId = runId
+        ? `${runId}-step-${stepIndex}${attemptTag}`
+        : `artifact-${Date.now()}-${stepIndex}${attemptTag}`;
       const screenshotPath = path.join(artifactsDir, `${screenshotId}.png`);
       try {
         await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -268,7 +279,7 @@ export class PlaywrightExecutor {
     return result;
   }
 
-  private async runAction(page: Page, step: ActionStep, stepIndex: number, artifactsDir: string, artifacts: Artifact[]): Promise<void> {
+  private async runAction(page: Page, step: ActionStep, stepIndex: number, artifactsDir: string, artifacts: Artifact[], runId?: string): Promise<void> {
     const timeout = step.timeout ?? 30_000;
     switch (step.action) {
       case "navigate":
@@ -308,8 +319,11 @@ export class PlaywrightExecutor {
         }, step.selector ?? "");
         break;
       case "screenshot": {
-        // Named screenshot step – save to the run's artifacts directory and register artifact
-        const screenshotId = `artifact-screenshot-${Date.now()}`;
+        // Named screenshot step – save to the run's artifacts directory and register artifact.
+        // Use deterministic naming when a runId is supplied (Issue #24).
+        const screenshotId = runId
+          ? `${runId}-screenshot-step-${stepIndex}`
+          : `artifact-screenshot-${Date.now()}`;
         const screenshotPath = path.join(artifactsDir, `${screenshotId}.png`);
         await page.screenshot({ path: screenshotPath, fullPage: true });
         artifacts.push({

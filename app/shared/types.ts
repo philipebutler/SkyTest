@@ -95,7 +95,7 @@ export type IpcChannel =
   | "saveSettings";
 
 /**
- * Persisted user settings (Issue #2).
+ * Persisted user settings (Issue #2, Issue #3).
  * All paths default to sub-directories of Electron's userData folder.
  * Setting a path to an empty string restores the default.
  */
@@ -111,6 +111,16 @@ export interface Settings {
   artifactsDir: string;
   /** Override for the exports directory. Empty string = use default. */
   exportsDir: string;
+  /** Last-used environment (Issue #3). */
+  lastEnvironment: string;
+  /** Last-used browser (Issue #3). */
+  lastBrowser: BrowserType;
+  /** Whether headed mode was last enabled (Issue #3). */
+  lastHeaded: boolean;
+  /** Last-used auth profile (Issue #3). */
+  lastAuthProfile: string;
+  /** Last-used tool policy (Issue #3). */
+  lastToolPolicy: ToolPolicy;
   createdAt: string;
   updatedAt: string;
 }

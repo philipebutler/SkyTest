@@ -144,6 +144,7 @@ export class StorageService {
       try {
         const raw = fs.readFileSync(settingsPath, "utf-8");
         const parsed = JSON.parse(raw) as Partial<Settings>;
+        const defaults = this.defaultSettings();
         const now = new Date().toISOString();
         return {
           schemaVersion: parsed.schemaVersion ?? SCHEMA_VERSION,
@@ -152,6 +153,11 @@ export class StorageService {
           authDir: parsed.authDir ?? "",
           artifactsDir: parsed.artifactsDir ?? "",
           exportsDir: parsed.exportsDir ?? "",
+          lastEnvironment: parsed.lastEnvironment ?? defaults.lastEnvironment,
+          lastBrowser: parsed.lastBrowser ?? defaults.lastBrowser,
+          lastHeaded: parsed.lastHeaded ?? defaults.lastHeaded,
+          lastAuthProfile: parsed.lastAuthProfile ?? defaults.lastAuthProfile,
+          lastToolPolicy: parsed.lastToolPolicy ?? defaults.lastToolPolicy,
           createdAt: parsed.createdAt ?? now,
           updatedAt: parsed.updatedAt ?? now,
         };
@@ -171,6 +177,11 @@ export class StorageService {
       authDir: "",
       artifactsDir: "",
       exportsDir: "",
+      lastEnvironment: "default",
+      lastBrowser: "chromium",
+      lastHeaded: false,
+      lastAuthProfile: "none",
+      lastToolPolicy: "read-only",
       createdAt: now,
       updatedAt: now,
     };

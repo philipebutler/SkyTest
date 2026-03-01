@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import type { Settings } from "../../shared/types";
+import type { BrowserType, Settings, ToolPolicy } from "../../shared/types";
 
 // Typed IPC bridge exposed by preload.ts
 declare global {
@@ -23,6 +23,9 @@ const DIR_FIELDS: Array<{
   { key: "exportsDir", label: "Exports directory", hint: "Stores exported Markdown / JSON reports." },
 ];
 
+const BROWSERS: BrowserType[] = ["chromium", "firefox", "webkit"];
+const TOOL_POLICIES: ToolPolicy[] = ["read-only", "safe-write", "full"];
+
 export default function SettingsScreen(): React.ReactElement {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<Partial<Settings>>({});
@@ -39,6 +42,11 @@ export default function SettingsScreen(): React.ReactElement {
         authDir: s.authDir,
         artifactsDir: s.artifactsDir,
         exportsDir: s.exportsDir,
+        lastEnvironment: s.lastEnvironment,
+        lastBrowser: s.lastBrowser,
+        lastHeaded: s.lastHeaded,
+        lastAuthProfile: s.lastAuthProfile,
+        lastToolPolicy: s.lastToolPolicy,
       });
     } catch (err) {
       setError(`Failed to load settings: ${String(err)}`);
@@ -49,7 +57,7 @@ export default function SettingsScreen(): React.ReactElement {
     void load();
   }, [load]);
 
-  const handleChange = (key: keyof Settings, value: string) => {
+  const handleChange = (key: keyof Settings, value: string | boolean) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
     setStatus("idle");
   };
@@ -119,6 +127,95 @@ export default function SettingsScreen(): React.ReactElement {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Run defaults section (Issue #3) */}
+      <h3 style={styles.sectionHeading}>Run Defaults</h3>
+      <p style={styles.subheading}>
+        These values are auto-saved whenever you change the TopBar controls and are restored on
+        restart.
+      </p>
+
+      <div style={styles.form}>
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="setting-lastEnvironment">
+            Last-used environment
+          </label>
+          <input
+            id="setting-lastEnvironment"
+            style={styles.input}
+            type="text"
+            value={(draft.lastEnvironment as string) ?? ""}
+            onChange={(e) => handleChange("lastEnvironment", e.target.value)}
+            placeholder="default"
+            aria-label="Last-used environment"
+          />
+        </div>
+
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="setting-lastBrowser">
+            Last-used browser
+          </label>
+          <select
+            id="setting-lastBrowser"
+            style={styles.select}
+            value={(draft.lastBrowser as string) ?? "chromium"}
+            onChange={(e) => handleChange("lastBrowser", e.target.value as BrowserType)}
+            aria-label="Last-used browser"
+          >
+            {BROWSERS.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={styles.field}>
+          <label style={styles.label}>
+            <input
+              type="checkbox"
+              checked={(draft.lastHeaded as boolean) ?? false}
+              onChange={(e) => handleChange("lastHeaded", e.target.checked)}
+              style={{ marginRight: "0.4rem" }}
+            />
+            Headed mode
+          </label>
+        </div>
+
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="setting-lastAuthProfile">
+            Last-used auth profile
+          </label>
+          <input
+            id="setting-lastAuthProfile"
+            style={styles.input}
+            type="text"
+            value={(draft.lastAuthProfile as string) ?? ""}
+            onChange={(e) => handleChange("lastAuthProfile", e.target.value)}
+            placeholder="none"
+            aria-label="Last-used auth profile"
+          />
+        </div>
+
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="setting-lastToolPolicy">
+            Last-used tool policy
+          </label>
+          <select
+            id="setting-lastToolPolicy"
+            style={styles.select}
+            value={(draft.lastToolPolicy as string) ?? "read-only"}
+            onChange={(e) => handleChange("lastToolPolicy", e.target.value as ToolPolicy)}
+            aria-label="Tool policy"
+          >
+            {TOOL_POLICIES.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {error && <p style={styles.errorText}>{error}</p>}
@@ -236,5 +333,19 @@ const styles: Record<string, React.CSSProperties> = {
   loading: {
     color: "#888",
     fontSize: "0.875rem",
+  },
+  sectionHeading: {
+    fontSize: "1rem",
+    fontWeight: "bold",
+    marginTop: "2rem",
+    marginBottom: "0.25rem",
+  },
+  select: {
+    backgroundColor: "#1e1e1e",
+    border: "1px solid #555",
+    borderRadius: "4px",
+    color: "#d4d4d4",
+    padding: "0.4rem 0.6rem",
+    fontSize: "0.8rem",
   },
 };

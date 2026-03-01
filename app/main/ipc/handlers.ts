@@ -1,10 +1,13 @@
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
+import { dialog } from "electron";
+import * as fs from "fs";
 import * as path from "path";
 import { chromium } from "playwright";
 import type { BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
 import { TestCaseRepository } from "../storage/TestCaseRepository";
 import { RunRepository } from "../storage/RunRepository";
+import { RunExporter } from "../storage/RunExporter";
 import { CopilotAdapter } from "../llm/CopilotAdapter";
 import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
 import { validateDSL, validateDSLPolicy } from "../validation/dslValidator";
@@ -229,6 +232,46 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     const testRepo = new TestCaseRepository(StorageService.getInstance().testsDir);
     testRepo.delete(payload.testId);
   });
+
+  // Channel: exportRun (Issue #20)
+  // Loads a Run by ID, prompts the user to choose an export directory,
+  // and writes <runId>.md and <runId>.json to that location.
+  // Returns { mdPath, jsonPath } on success or throws on cancellation/error.
+  ipcMain.handle(
+    "exportRun",
+    async (_event, payload: { runId: string }): Promise<{ mdPath: string; jsonPath: string }> => {
+      const run = runRepo.load(payload.runId);
+      if (!run) {
+        throw new Error(`Run not found: ${payload.runId}`);
+      }
+
+      // Prompt the user to select an export directory.
+      const result = await dialog.showOpenDialog({
+        title: "Select Export Folder",
+        defaultPath: StorageService.getInstance().exportsDir,
+        properties: ["openDirectory", "createDirectory"],
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        throw new Error("Export cancelled by user.");
+      }
+
+      const exportDir = result.filePaths[0];
+      // Sanitize the run ID to prevent path traversal: strip all non-alphanumeric characters
+      // except hyphens and underscores, then apply path.basename as a second guard.
+      const safeId = path.basename(payload.runId.replace(/[^a-z0-9_-]/gi, "_"));
+      const { markdown, json } = new RunExporter().export(run);
+
+      const mdPath = path.join(exportDir, `${safeId}.md`);
+      const jsonPath = path.join(exportDir, `${safeId}.json`);
+
+      fs.writeFileSync(mdPath, markdown, "utf-8");
+      fs.writeFileSync(jsonPath, json, "utf-8");
+
+      console.log(`[exportRun] Exported run ${payload.runId} to: ${exportDir}`);
+      return { mdPath, jsonPath };
+    }
+  );
 
   // Channel: getRunHistory
   // Returns all persisted Run records from the runs/ directory (Issue #18).

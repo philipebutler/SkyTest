@@ -1,4 +1,4 @@
-import type { IpcMain } from "electron";
+import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import type { DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
@@ -16,10 +16,11 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
   // Returns { streamId } immediately so the renderer can correlate stream events.
   // If the LLM response is a clarification, the terminal token carries responseType="clarification"
   // and no Playwright execution is triggered (Issue #6).
-  ipcMain.handle("chat:send", async (event, payload: ChatSendPayload): Promise<{ streamId: string }> => {
+  ipcMain.handle("chat:send", async (event: IpcMainInvokeEvent, payload: ChatSendPayload): Promise<{ streamId: string }> => {
     const streamId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const sender = event.sender;
     // Run asynchronously so the invoke call returns streamId without waiting for the full LLM response
-    void orchestrator.handleChatSend(streamId, payload, event.sender).then((response) => {
+    void orchestrator.handleChatSend(streamId, payload, sender).then((response) => {
       // Issue #6: Never execute Playwright when the LLM is asking for clarification.
       // Execution is only permitted when the response is a resolved DSL plan.
       if (response.type === "plan") {
@@ -28,7 +29,10 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
         const schemaResult = validateDSL(response.content as unknown);
         if (!schemaResult.valid) {
           console.warn(`[chat:send] streamId=${streamId} – DSL schema validation failed:`, schemaResult.errors);
-          // Return; execution must not begin when DSL is invalid (SPEC §6.3)
+          // Notify the renderer so the user sees an actionable error message (Issue #8)
+          if (!sender.isDestroyed()) {
+            sender.send("chat:executionError", { streamId, reason: "schema", errors: schemaResult.errors });
+          }
           return;
         }
         // Safe cast: validateDSL returned valid=true, confirming the shape is DSLPlan
@@ -36,7 +40,10 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
         const policyResult = validateDSLPolicy(dslPlan, payload.toolPolicy);
         if (!policyResult.valid) {
           console.warn(`[chat:send] streamId=${streamId} – DSL policy validation failed:`, policyResult.errors);
-          // Return; policy violations block execution (SPEC §8)
+          // Notify the renderer so the user sees which actions are blocked (Issue #8 / SPEC §8)
+          if (!sender.isDestroyed()) {
+            sender.send("chat:executionError", { streamId, reason: "policy", errors: policyResult.errors });
+          }
           return;
         }
         // TODO (#11): Wire Playwright executor here – only reached when type === "plan" and DSL is valid

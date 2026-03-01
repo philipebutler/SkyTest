@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Chat from "./screens/Chat";
+import RunHistory from "./screens/RunHistory";
 import SettingsScreen from "./screens/Settings";
 import TestLibrary from "./screens/TestLibrary";
 import type { BrowserType, Settings, ToolPolicy } from "../shared/types";
@@ -98,7 +99,7 @@ export default function App(): React.ReactElement {
           <Chat config={config} runTrigger={runTrigger} registerRun={registerRun} />
           )}
           {screen === "tests" && <TestLibrary config={config} />}
-          {screen === "runs" && <Placeholder title="Run History" />}
+          {screen === "runs" && <RunHistory />}
           {screen === "record" && <Placeholder title="Record Mode" />}
           {screen === "settings" && <SettingsScreen />}
         </main>

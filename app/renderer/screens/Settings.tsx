@@ -33,6 +33,11 @@ export default function SettingsScreen(): React.ReactElement {
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
+  // Auth session update state (Issue #13)
+  const [authEnv, setAuthEnv] = useState<string>("");
+  const [authStatus, setAuthStatus] = useState<"idle" | "launching" | "saved" | "error">("idle");
+  const [authError, setAuthError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     try {
       const s = (await window.skytest.invoke("getSettings")) as Settings;
@@ -49,6 +54,7 @@ export default function SettingsScreen(): React.ReactElement {
         lastAuthProfile: s.lastAuthProfile,
         lastToolPolicy: s.lastToolPolicy,
       });
+      setAuthEnv(s.lastEnvironment ?? "default");
     } catch (err) {
       setError(`Failed to load settings: ${String(err)}`);
     }
@@ -78,6 +84,25 @@ export default function SettingsScreen(): React.ReactElement {
 
   const handleReset = (key: keyof Settings) => {
     handleChange(key, "");
+  };
+
+  // Launch headed browser for manual login and save storageState (Issue #13)
+  const handleUpdateSession = async () => {
+    setAuthStatus("launching");
+    setAuthError(null);
+    try {
+      const result = (await window.skytest.invoke("auth:updateSession", { environment: authEnv || "default" })) as {
+        saved: boolean;
+        path: string;
+      };
+      setAuthStatus(result.saved ? "saved" : "error");
+      if (!result.saved) {
+        setAuthError("Session was not saved — the browser may have been closed before login completed.");
+      }
+    } catch (err) {
+      setAuthError(`Failed to update session: ${String(err)}`);
+      setAuthStatus("error");
+    }
   };
 
   if (!settings) {
@@ -220,6 +245,48 @@ export default function SettingsScreen(): React.ReactElement {
       </div>
 
       {error && <p style={styles.errorText}>{error}</p>}
+
+      {/* Manual Login / Update Session section (Issue #13) */}
+      <h3 style={styles.sectionHeading}>Manual Login / Update Session</h3>
+      <p style={styles.subheading}>
+        Launch a headed browser, log in manually, then close the browser. SkyTest will save the
+        session as <code>storageState.json</code> for the chosen environment and reuse it in future
+        runs.
+      </p>
+      <div style={styles.form}>
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="auth-env">
+            Environment
+          </label>
+          <div style={styles.inputRow}>
+            <input
+              id="auth-env"
+              style={styles.input}
+              type="text"
+              value={authEnv}
+              onChange={(e) => { setAuthEnv(e.target.value); setAuthStatus("idle"); }}
+              placeholder="default"
+              aria-label="Auth environment"
+              disabled={authStatus === "launching"}
+            />
+            <button
+              style={{
+                ...styles.saveButton,
+                ...(authStatus === "launching" ? styles.buttonDisabled : {}),
+              }}
+              onClick={() => void handleUpdateSession()}
+              disabled={authStatus === "launching"}
+              type="button"
+            >
+              {authStatus === "launching" ? "Browser open – log in and close…" : "Update Session"}
+            </button>
+          </div>
+          {authStatus === "saved" && (
+            <p style={styles.savedText}>✅ Session saved for environment "{authEnv || "default"}".</p>
+          )}
+          {authError && <p style={styles.errorText}>{authError}</p>}
+        </div>
+      </div>
 
       <div style={styles.footer}>
         {status === "saved" && <span style={styles.savedText}>✅ Settings saved.</span>}

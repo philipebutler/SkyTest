@@ -1,6 +1,7 @@
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import * as fs from "fs";
 import * as path from "path";
+import { chromium } from "playwright";
 import type { BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
 import { CopilotAdapter } from "../llm/CopilotAdapter";
@@ -89,11 +90,14 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     try {
       const dslPlan: DSLPlan = { version: "1", intent: config.command, steps: [] };
       if (dslPlan.steps.length > 0) {
+        const storage = StorageService.getInstance();
+        const storageStatePath = storage.getStorageStatePath(config.authProfile ?? "none") ?? undefined;
         const executionResult = await executor.execute(
           dslPlan,
           config.browser,
           config.headed,
-          StorageService.getInstance().artifactsDir
+          storage.artifactsDir,
+          storageStatePath
         );
         run.stepResults = executionResult.stepResults;
         run.artifacts = executionResult.artifacts;
@@ -143,11 +147,15 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       const browserToUse: BrowserType = testCase.browser ?? "chromium";
       run.browser = browserToUse;
       const dslPlan: DSLPlan = { version: "1", intent: payload.testId, steps: testCase.steps };
+      const storage = StorageService.getInstance();
+      // Reuse auth session for the test's environment when a saved state exists (Issue #13)
+      const storageStatePath = storage.getStorageStatePath(run.environment) ?? undefined;
       const executionResult = await executor.execute(
         dslPlan,
         browserToUse,
         run.headed,
-        StorageService.getInstance().artifactsDir
+        storage.artifactsDir,
+        storageStatePath
       );
       run.stepResults = executionResult.stepResults;
       run.artifacts = executionResult.artifacts;
@@ -223,4 +231,60 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       return StorageService.getInstance().saveSettings(patch);
     }
   );
+
+  // Channel: auth:updateSession (Issue #13)
+  // Launches a headed Chromium browser so the user can log in manually.
+  // Saves storageState.json to the auth directory for the given environment.
+  // The IPC call blocks until the user closes the browser window.
+  ipcMain.handle(
+    "auth:updateSession",
+    async (_event, payload: { environment: string }): Promise<{ saved: boolean; path: string }> => {
+      const environment = payload.environment ?? "default";
+      const authDir = StorageService.getInstance().authDir;
+      // Sanitize environment name to prevent path traversal (Issue #13)
+      const safeName = environment.replace(/[^a-z0-9_-]/gi, "_");
+      const storageStatePath = path.join(authDir, `${safeName}.json`);
+
+      const browser = await chromium.launch({ headless: false });
+      const context = await browser.newContext();
+      await context.newPage();
+
+      let stateSaved = false;
+
+      // Save storageState when a page closes while the context is still valid.
+      // Page-close events fire before the context/browser-disconnect events,
+      // so context.storageState() is callable here (Issue #13).
+      // stateSaved is set to true before the first await, preventing concurrent
+      // duplicate saves across multiple page-close events in the same event loop.
+      const onPageClose = async () => {
+        if (stateSaved) return;
+        stateSaved = true;
+        try {
+          await context.storageState({ path: storageStatePath });
+          console.log(`[auth:updateSession] storageState saved to: ${storageStatePath}`);
+        } catch (err) {
+          console.warn(`[auth:updateSession] Could not save storageState:`, err);
+        }
+      };
+
+      // Register listener for the initial page and any future pages the user opens.
+      for (const p of context.pages()) {
+        p.on("close", () => void onPageClose());
+      }
+      context.on("page", (p) => p.on("close", () => void onPageClose()));
+
+      // Wait for the user to close the browser window.
+      await new Promise<void>((resolve) => {
+        browser.on("disconnected", () => resolve());
+      });
+
+      return { saved: stateSaved, path: storageStatePath };
+    }
+  );
+
+  // Channel: auth:listProfiles (Issue #13)
+  // Returns the list of saved auth profile names (environments with a storageState file).
+  ipcMain.handle("auth:listProfiles", async (): Promise<string[]> => {
+    return StorageService.getInstance().listAuthProfiles();
+  });
 }

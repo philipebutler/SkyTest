@@ -15,6 +15,7 @@
 
 import { PlaywrightExecutor } from "./PlaywrightExecutor";
 import { chromium, firefox, webkit } from "playwright";
+import * as fs from "fs";
 import type { BrowserType, DSLPlan } from "../../shared/types";
 
 describe("PlaywrightExecutor – getLauncher (browser selection)", () => {
@@ -372,5 +373,58 @@ describe("PlaywrightExecutor – screenshot action registers artifact (Issue #12
     expect(result.artifacts[0].type).toBe("screenshot");
     expect(result.artifacts[0].path).toContain(".png");
     expect(result.artifacts[0].stepIndex).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #13 – storageState (session reuse) acceptance criteria
+// ---------------------------------------------------------------------------
+
+describe("PlaywrightExecutor – storageState session reuse (Issue #13)", () => {
+  let executor: PlaywrightExecutor;
+  let newContextSpy: jest.Mock;
+
+  beforeEach(() => {
+    executor = new PlaywrightExecutor();
+    const mockPage = {
+      goto: jest.fn().mockResolvedValue(undefined),
+      click: jest.fn(),
+      fill: jest.fn(),
+      selectOption: jest.fn(),
+      check: jest.fn(),
+      uncheck: jest.fn(),
+      hover: jest.fn(),
+      waitForTimeout: jest.fn(),
+      waitForSelector: jest.fn(),
+      waitForLoadState: jest.fn(),
+      evaluate: jest.fn(),
+      screenshot: jest.fn(),
+      waitForFunction: jest.fn(),
+    };
+    newContextSpy = jest.fn().mockResolvedValue({ newPage: jest.fn().mockResolvedValue(mockPage), close: jest.fn() });
+    const mockBrowser = { newContext: newContextSpy, close: jest.fn() };
+    jest.spyOn(executor, "getLauncher").mockReturnValue({ launch: jest.fn().mockResolvedValue(mockBrowser) } as never);
+  });
+
+  it("passes storageState option to newContext when a valid path is provided", async () => {
+    // Write a real temp file so fs.existsSync returns true
+    const tmpFile = require("os").tmpdir() + "/skytest-storagestate-test.json";
+    fs.writeFileSync(tmpFile, "{}");
+    const plan: DSLPlan = { version: "1", intent: "session reuse", steps: [] };
+    await executor.execute(plan, "chromium", false, "/tmp", tmpFile);
+    expect(newContextSpy).toHaveBeenCalledWith({ storageState: tmpFile });
+    fs.unlinkSync(tmpFile);
+  });
+
+  it("passes an empty context options when storageStatePath is not provided", async () => {
+    const plan: DSLPlan = { version: "1", intent: "no session", steps: [] };
+    await executor.execute(plan, "chromium", false, "/tmp");
+    expect(newContextSpy).toHaveBeenCalledWith({});
+  });
+
+  it("passes empty context options when storageStatePath file does not exist", async () => {
+    const plan: DSLPlan = { version: "1", intent: "missing state", steps: [] };
+    await executor.execute(plan, "chromium", false, "/tmp", "/auth/does-not-exist-12345.json");
+    expect(newContextSpy).toHaveBeenCalledWith({});
   });
 });

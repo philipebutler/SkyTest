@@ -13,6 +13,7 @@ import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
 import { validateDSL, validateDSLPolicy } from "../validation/dslValidator";
 import { PlaywrightExecutor } from "../runner/PlaywrightExecutor";
 import { RecordEngine } from "../record/RecordEngine";
+import { RecordingRefactorer, type RefactoredRecording } from "../record/RecordingRefactorer";
 
 export function registerIpcHandlers(ipcMain: IpcMain): void {
   const orchestrator = new LLMOrchestrator(new CopilotAdapter());
@@ -211,7 +212,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       tags: [],
       preconditions: [],
       steps: payload.steps,
-      assertions: [],
+      assertions: payload.assertions ?? [],
       browser: payload.browser,
       createdAt: now,
       updatedAt: now,
@@ -379,6 +380,17 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       const recordingsDir = StorageService.getInstance().recordingsDir;
       const steps = await recordEngine.stop(recordingsDir);
       return { steps };
+    }
+  );
+
+  // Channel: record:refactor (Issue #22)
+  // Sends raw ActionStep[] to the LLM for refactoring into clean DSL with suggested assertions.
+  // Returns a RefactoredRecording for the user to review before saving.
+  ipcMain.handle(
+    "record:refactor",
+    async (_event, payload: { steps: ActionStep[] }): Promise<RefactoredRecording> => {
+      const refactorer = new RecordingRefactorer(new CopilotAdapter());
+      return refactorer.refactor(payload.steps ?? []);
     }
   );
 }

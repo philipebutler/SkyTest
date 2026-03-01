@@ -146,6 +146,16 @@ export interface RawRecording {
   createdAt: string;
 }
 
+/** Draft test produced by the LLM that the user reviews before saving (Issue #22). */
+export interface RefactoredRecording {
+  /** Human-readable summary of what the recording does. */
+  intent: string;
+  /** Cleaned-up steps with improved selectors. */
+  steps: ActionStep[];
+  /** Suggested assertions (user may edit before saving). */
+  assertions: Assertion[];
+}
+
 export interface RunConfig {
   command: string;
   environment: string;
@@ -159,6 +169,8 @@ export interface SaveTestPayload {
   name: string;
   /** Raw chat transcript captured as steps */
   steps: ActionStep[];
+  /** Assertions to persist with the TestCase (Issue #22). */
+  assertions?: Assertion[];
   /** Browser that was active when the test was saved (Issue #9). */
   browser?: BrowserType;
 }
@@ -190,7 +202,8 @@ export type IpcChannel =
   | "auth:updateSession"
   | "auth:listProfiles"
   | "record:start"
-  | "record:stop";
+  | "record:stop"
+  | "record:refactor";
 
 /**
  * Persisted user settings (Issue #2, Issue #3).

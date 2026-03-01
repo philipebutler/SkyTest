@@ -2,10 +2,12 @@ import { chromium, firefox, webkit } from "playwright";
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from "playwright";
 import * as fs from "fs";
 import * as path from "path";
-import type { ActionStep, Artifact, BrowserType, DSLPlan, StepResult } from "../../shared/types";
+import type { ActionStep, Artifact, Assertion, AssertionResult, BrowserType, DSLPlan, StepResult } from "../../shared/types";
+import { AssertionEngine } from "./AssertionEngine";
 
 export interface ExecutionResult {
   stepResults: StepResult[];
+  assertionResults: AssertionResult[];
   artifacts: Artifact[];
 }
 
@@ -27,13 +29,15 @@ export class PlaywrightExecutor {
    * @param headed            - Whether to run the browser in headed (visible) mode.
    * @param artifactsDir      - Directory to write screenshots and other artifacts.
    * @param storageStatePath  - Optional path to a storageState.json for session reuse (Issue #13).
+   * @param assertions        - Optional assertions to evaluate after all steps complete (Issue #17).
    */
   async execute(
     plan: DSLPlan,
     browser: BrowserType,
     headed: boolean,
     artifactsDir: string,
-    storageStatePath?: string
+    storageStatePath?: string,
+    assertions?: Assertion[]
   ): Promise<ExecutionResult> {
     const launcher = this.getLauncher(browser);
     const browserInstance: Browser = await launcher.launch({ headless: !headed });
@@ -59,10 +63,16 @@ export class PlaywrightExecutor {
       }
     }
 
+    // Run assertions after all steps complete (Issue #17)
+    const assertionResults: AssertionResult[] =
+      assertions && assertions.length > 0
+        ? await new AssertionEngine().runAssertions(page, assertions)
+        : [];
+
     await context.close();
     await browserInstance.close();
 
-    return { stepResults, artifacts };
+    return { stepResults, assertionResults, artifacts };
   }
 
   /** Returns the Playwright browser launcher for the given BrowserType. */

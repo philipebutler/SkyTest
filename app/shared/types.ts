@@ -103,6 +103,13 @@ export interface StepResult {
   durationMs: number;
 }
 
+export interface AssertionResult {
+  assertionIndex: number;
+  type: Assertion["type"];
+  status: "passed" | "failed";
+  error?: string;
+}
+
 export interface Artifact {
   id: string;
   type: "screenshot" | "log" | "html" | "har";
@@ -121,6 +128,7 @@ export interface Run {
   toolPolicy: ToolPolicy;
   status: "running" | "passed" | "failed" | "aborted";
   stepResults: StepResult[];
+  assertionResults?: AssertionResult[];
   artifacts: Artifact[];
   startedAt: string;
   finishedAt?: string;

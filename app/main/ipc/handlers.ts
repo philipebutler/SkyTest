@@ -1,10 +1,11 @@
 import type { IpcMain } from "electron";
 import * as fs from "fs";
 import * as path from "path";
-import type { Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
+import type { DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
 import { CopilotAdapter } from "../llm/CopilotAdapter";
 import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
+import { validateDSL, validateDSLPolicy } from "../validation/dslValidator";
 
 export function registerIpcHandlers(ipcMain: IpcMain): void {
   const orchestrator = new LLMOrchestrator(new CopilotAdapter());
@@ -22,8 +23,24 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       // Issue #6: Never execute Playwright when the LLM is asking for clarification.
       // Execution is only permitted when the response is a resolved DSL plan.
       if (response.type === "plan") {
-        // TODO (#11): Wire Playwright executor here – only reached when type === "plan"
-        console.log(`[chat:send] streamId=${streamId} – plan received, ready for execution`);
+        // Validate DSL schema before execution (Issue #7)
+        // Pass content as unknown so validateDSL performs full runtime checks first.
+        const schemaResult = validateDSL(response.content as unknown);
+        if (!schemaResult.valid) {
+          console.warn(`[chat:send] streamId=${streamId} – DSL schema validation failed:`, schemaResult.errors);
+          // Return; execution must not begin when DSL is invalid (SPEC §6.3)
+          return;
+        }
+        // Safe cast: validateDSL returned valid=true, confirming the shape is DSLPlan
+        const dslPlan = response.content as DSLPlan;
+        const policyResult = validateDSLPolicy(dslPlan, payload.toolPolicy);
+        if (!policyResult.valid) {
+          console.warn(`[chat:send] streamId=${streamId} – DSL policy validation failed:`, policyResult.errors);
+          // Return; policy violations block execution (SPEC §8)
+          return;
+        }
+        // TODO (#11): Wire Playwright executor here – only reached when type === "plan" and DSL is valid
+        console.log(`[chat:send] streamId=${streamId} – plan valid, ready for execution`);
       } else {
         console.log(`[chat:send] streamId=${streamId} – no execution: response type is "${response.type}"`);
       }

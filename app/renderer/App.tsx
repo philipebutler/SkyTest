@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Chat from "./screens/Chat";
 import SettingsScreen from "./screens/Settings";
+import TestLibrary from "./screens/TestLibrary";
 import type { BrowserType, Settings, ToolPolicy } from "../shared/types";
 
 export type Screen = "chat" | "tests" | "runs" | "record" | "settings";
@@ -96,7 +97,7 @@ export default function App(): React.ReactElement {
           {screen === "chat" && (
           <Chat config={config} runTrigger={runTrigger} registerRun={registerRun} />
           )}
-          {screen === "tests" && <Placeholder title="Test Library" />}
+          {screen === "tests" && <TestLibrary config={config} />}
           {screen === "runs" && <Placeholder title="Run History" />}
           {screen === "record" && <Placeholder title="Record Mode" />}
           {screen === "settings" && <SettingsScreen />}

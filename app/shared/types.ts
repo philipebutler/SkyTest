@@ -259,6 +259,12 @@ export interface Settings {
   retryCount: number;
   /** Default retry mode: retry per step or per test (Issue #23). */
   retryMode: "step" | "test";
+  /** OpenAI-compatible API base URL, e.g. https://api.openai.com/v1 (Issue #5). */
+  llmEndpoint: string;
+  /** API key for the LLM provider. Never sent to the LLM payload (Issue #5). */
+  llmApiKey: string;
+  /** Model name, e.g. gpt-4o (Issue #5). */
+  llmModel: string;
   createdAt: string;
   updatedAt: string;
 }

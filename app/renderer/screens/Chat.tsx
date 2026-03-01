@@ -25,6 +25,8 @@ interface Message {
   isClarification?: boolean;
   /** Marks this message as an execution-blocked error (Issue #8) */
   isExecutionError?: boolean;
+  /** Command to retry when the user clicks the Retry button (SPEC §5.2) */
+  retryCommand?: string;
 }
 
 interface Props {
@@ -54,6 +56,9 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
   const inputRef = useRef(input);
   inputRef.current = input;
 
+  // Track the last sent command so error messages can offer a Retry affordance (SPEC §5.2)
+  const lastCommandRef = useRef<string>("");
+
   // Issue #8: Listen for execution errors (schema/policy violations) pushed from the main process.
   // These surface as visible error messages in the transcript so the user knows why execution was blocked.
   useEffect(() => {
@@ -70,6 +75,7 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
           role: "result" as const,
           text: `⛔ Execution blocked – ${label}\n\nThe plan was not executed because one or more steps are not permitted:\n${details}\n\nSwitch to a more permissive tool policy or adjust your request.`,
           isExecutionError: true,
+          retryCommand: lastCommandRef.current || undefined,
         },
       ]);
     });
@@ -88,6 +94,7 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
     const command = inputRef.current.trim();
     if (!command) return;
 
+    lastCommandRef.current = command;
     setMessages((prev) => [...prev, { role: "user", text: command, command }]);
     setInput("");
     setRunning(true);
@@ -179,7 +186,7 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
       }
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: `Error: ${String(err)}` },
+        { role: "assistant", text: `Error: ${String(err)}`, retryCommand: command },
       ]);
       setRunning(false);
     }
@@ -236,6 +243,11 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
     }
   };
 
+  // SPEC §5.2: Retry affordance — populate input with the failed command so the user can re-send
+  const handleRetry = useCallback((command: string) => {
+    setInput(command);
+  }, []);
+
   const hasUserMessages = messages.some((m) => m.role === "user");
 
   return (
@@ -269,6 +281,16 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
                 : "Assistant"}
             </span>
             <span style={msg.isExecutionError ? styles.preWrapText : styles.text}>{msg.text}</span>
+            {msg.retryCommand && !running && (
+              <button
+                style={styles.retryButton}
+                onClick={() => msg.retryCommand && handleRetry(msg.retryCommand)}
+                type="button"
+                title="Copy command back to input to retry"
+              >
+                🔁 Retry
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -393,6 +415,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.875rem",
     lineHeight: "1.4",
     whiteSpace: "pre-wrap",
+  },
+  retryButton: {
+    alignSelf: "flex-start",
+    marginTop: "0.4rem",
+    backgroundColor: "transparent",
+    border: "1px solid currentColor",
+    borderRadius: "4px",
+    color: "inherit",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    opacity: 0.8,
+    padding: "0.2rem 0.6rem",
   },
   inputRow: {
     display: "flex",

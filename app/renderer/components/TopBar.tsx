@@ -5,14 +5,30 @@ import type { BrowserType, ToolPolicy } from "../../shared/types";
 interface Props {
   config: AppConfig;
   onConfigChange: (cfg: AppConfig) => void;
+  onRun: () => void;
 }
 
 const BROWSERS: BrowserType[] = ["chromium", "firefox", "webkit"];
 const TOOL_POLICIES: ToolPolicy[] = ["read-only", "safe-write", "full"];
+// Auth profiles are loaded from the auth/ directory at runtime.
+// For the skeleton, a static list with a "none" default is used.
+// TODO (#auth): Populate from auth/ storageState files per environment (SPEC §8)
+const AUTH_PROFILES = ["none"];
 
-export default function TopBar({ config, onConfigChange }: Props): React.ReactElement {
+export default function TopBar({ config, onConfigChange, onRun }: Props): React.ReactElement {
   const update = <K extends keyof AppConfig>(key: K, value: AppConfig[K]) =>
     onConfigChange({ ...config, [key]: value });
+
+  const handlePolicyChange = (value: ToolPolicy) => {
+    // SPEC §7: "Full requires explicit confirmation"
+    if (value === "full") {
+      const confirmed = window.confirm(
+        "⚠️ Full tool policy allows destructive browser actions.\n\nAre you sure you want to enable Full policy?"
+      );
+      if (!confirmed) return;
+    }
+    update("toolPolicy", value);
+  };
 
   return (
     <header style={styles.topBar}>
@@ -53,11 +69,26 @@ export default function TopBar({ config, onConfigChange }: Props): React.ReactEl
       </label>
 
       <label style={styles.label}>
+        Auth
+        <select
+          style={styles.select}
+          value={config.authProfile}
+          onChange={(e) => update("authProfile", e.target.value)}
+        >
+          {AUTH_PROFILES.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label style={styles.label}>
         Policy
         <select
           style={styles.select}
           value={config.toolPolicy}
-          onChange={(e) => update("toolPolicy", e.target.value as ToolPolicy)}
+          onChange={(e) => handlePolicyChange(e.target.value as ToolPolicy)}
         >
           {TOOL_POLICIES.map((p) => (
             <option key={p} value={p}>
@@ -66,6 +97,10 @@ export default function TopBar({ config, onConfigChange }: Props): React.ReactEl
           ))}
         </select>
       </label>
+
+      <button style={styles.runButton} onClick={onRun} title="Run with current configuration">
+        ▶ Run
+      </button>
 
       <span style={styles.policyBadge} title="Active tool policy">
         🛡 {config.toolPolicy}
@@ -114,6 +149,16 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#d4d4d4",
     padding: "0.2rem 0.4rem",
     fontSize: "0.8rem",
+  },
+  runButton: {
+    backgroundColor: "#0e639c",
+    border: "none",
+    borderRadius: "4px",
+    color: "#ffffff",
+    cursor: "pointer",
+    padding: "0.3rem 0.9rem",
+    fontSize: "0.8rem",
+    fontWeight: "bold",
   },
   policyBadge: {
     marginLeft: "auto",

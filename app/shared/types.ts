@@ -69,12 +69,23 @@ export interface RunConfig {
   authProfile?: string;
 }
 
+export interface SaveTestPayload {
+  name: string;
+  /** Raw chat transcript captured as steps */
+  steps: ActionStep[];
+}
+
 // Typed IPC contracts (SPEC §6.1)
 export type IpcRequest =
   | { type: "ExecuteCommand"; payload: RunConfig }
   | { type: "ExecuteTest"; payload: { testId: string } }
   | { type: "GetRunHistory"; payload: Record<string, never> }
+  | { type: "SaveTest"; payload: SaveTestPayload }
   | { type: "ExportRun"; payload: { runId: string } }
   | { type: "UpdateSession"; payload: { environment: string } };
 
-export type IpcChannel = "executeCommand" | "executeTest" | "getRunHistory";
+export type IpcChannel =
+  | "executeCommand"
+  | "executeTest"
+  | "getRunHistory"
+  | "saveTest";

@@ -1,13 +1,20 @@
 import type { IpcMain } from "electron";
 import * as fs from "fs";
 import * as path from "path";
-import type { Run, RunConfig } from "../../shared/types";
+import type { Run, RunConfig, SaveTestPayload, TestCase } from "../../shared/types";
 
 const RUNS_DIR = path.join(process.cwd(), "runs");
+const TESTS_DIR = path.join(process.cwd(), "tests");
 
 function ensureRunsDir(): void {
   if (!fs.existsSync(RUNS_DIR)) {
     fs.mkdirSync(RUNS_DIR, { recursive: true });
+  }
+}
+
+function ensureTestsDir(): void {
+  if (!fs.existsSync(TESTS_DIR)) {
+    fs.mkdirSync(TESTS_DIR, { recursive: true });
   }
 }
 
@@ -65,6 +72,29 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       JSON.stringify(run, null, 2)
     );
     return run;
+  });
+
+  // Channel: saveTest
+  // Accepts a test name and chat-sourced steps, persists as a TestCase in tests/.
+  ipcMain.handle("saveTest", async (_event, payload: SaveTestPayload): Promise<TestCase> => {
+    const now = new Date().toISOString();
+    const testCase: TestCase = {
+      schemaVersion: "1",
+      id: `test-${Date.now()}`,
+      name: payload.name,
+      tags: [],
+      preconditions: [],
+      steps: payload.steps,
+      assertions: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    ensureTestsDir();
+    fs.writeFileSync(
+      path.join(TESTS_DIR, `${testCase.id}.json`),
+      JSON.stringify(testCase, null, 2)
+    );
+    return testCase;
   });
 
   // Channel: getRunHistory

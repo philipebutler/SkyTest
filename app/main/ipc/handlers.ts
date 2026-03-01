@@ -1,10 +1,10 @@
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
-import * as fs from "fs";
 import * as path from "path";
 import { chromium } from "playwright";
 import type { BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
 import { TestCaseRepository } from "../storage/TestCaseRepository";
+import { RunRepository } from "../storage/RunRepository";
 import { CopilotAdapter } from "../llm/CopilotAdapter";
 import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
 import { validateDSL, validateDSLPolicy } from "../validation/dslValidator";
@@ -13,6 +13,7 @@ import { PlaywrightExecutor } from "../runner/PlaywrightExecutor";
 export function registerIpcHandlers(ipcMain: IpcMain): void {
   const orchestrator = new LLMOrchestrator(new CopilotAdapter());
   const executor = new PlaywrightExecutor();
+  const runRepo = new RunRepository(StorageService.getInstance().runsDir);
 
   // Channel: chat:send (Issue #5 / SPEC §16, Issue #6 clarification enforcement)
   // Accepts a prompt + context from the renderer, starts an async LLM stream,
@@ -52,17 +53,41 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
         }
         // Wire Playwright executor – only reached when type === "plan" and DSL is valid (Issue #9)
         const storage = StorageService.getInstance();
-        const executionResult = await executor.execute(
-          dslPlan,
-          (payload.browser ?? "chromium") as BrowserType,
-          payload.headed ?? false,
-          storage.artifactsDir
-        );
-        const allPassed = executionResult.stepResults.every((r) => r.status !== "failed");
-        console.log(
-          `[chat:send] streamId=${streamId} – execution ${allPassed ? "passed" : "failed"} ` +
-          `(${executionResult.stepResults.length} steps, browser=${payload.browser})`
-        );
+        const browserToUse = (payload.browser ?? "chromium") as BrowserType;
+        const run: Run = {
+          schemaVersion: "1",
+          id: `run-${Date.now()}-${streamId}`,
+          environment: payload.environment ?? "default",
+          browser: browserToUse,
+          headed: payload.headed ?? false,
+          toolPolicy: payload.toolPolicy,
+          status: "running",
+          stepResults: [],
+          artifacts: [],
+          startedAt: new Date().toISOString(),
+        };
+        try {
+          const executionResult = await executor.execute(
+            dslPlan,
+            browserToUse,
+            payload.headed ?? false,
+            storage.artifactsDir
+          );
+          run.stepResults = executionResult.stepResults;
+          run.artifacts = executionResult.artifacts;
+          const allPassed = executionResult.stepResults.every((r) => r.status !== "failed");
+          run.status = allPassed ? "passed" : "failed";
+          console.log(
+            `[chat:send] streamId=${streamId} – execution ${run.status} ` +
+            `(${executionResult.stepResults.length} steps, browser=${browserToUse})`
+          );
+        } catch (err) {
+          run.status = "failed";
+          console.error(`[chat:send] streamId=${streamId} – execution error:`, err);
+        }
+        run.finishedAt = new Date().toISOString();
+        // Persist the run record so it survives app restart (Issue #18)
+        runRepo.save(run);
       } else {
         console.log(`[chat:send] streamId=${streamId} – no execution: response type is "${response.type}"`);
       }
@@ -111,11 +136,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       console.error("[executeCommand] Execution error:", err);
     }
     run.finishedAt = new Date().toISOString();
-    const runsDir = StorageService.getInstance().runsDir;
-    fs.writeFileSync(
-      path.join(runsDir, `${run.id}.json`),
-      JSON.stringify(run, null, 2)
-    );
+    runRepo.save(run);
     return run;
   });
 
@@ -170,11 +191,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       console.error("[executeTest] Execution error:", err);
     }
     run.finishedAt = new Date().toISOString();
-    const runsDir = StorageService.getInstance().runsDir;
-    fs.writeFileSync(
-      path.join(runsDir, `${run.id}.json`),
-      JSON.stringify(run, null, 2)
-    );
+    runRepo.save(run);
     return run;
   });
 
@@ -214,23 +231,9 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
   });
 
   // Channel: getRunHistory
-  // Returns all persisted Run records from the runs/ directory.
+  // Returns all persisted Run records from the runs/ directory (Issue #18).
   ipcMain.handle("getRunHistory", async (): Promise<Run[]> => {
-    const runsDir = StorageService.getInstance().runsDir;
-    const files = fs
-      .readdirSync(runsDir)
-      .filter((f) => f.endsWith(".json"));
-    const runs: Run[] = [];
-    for (const f of files) {
-      try {
-        const raw = fs.readFileSync(path.join(runsDir, f), "utf-8");
-        runs.push(JSON.parse(raw) as Run);
-      } catch {
-        console.warn(`[getRunHistory] Skipping corrupted run file: ${f}`);
-      }
-    }
-    runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-    return runs;
+    return runRepo.list();
   });
 
   // Channel: getSettings

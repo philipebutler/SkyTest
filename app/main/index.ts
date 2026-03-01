@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import * as path from "path";
 import { registerIpcHandlers } from "./ipc/handlers";
+import { StorageService } from "./storage/StorageService";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -29,6 +30,8 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  // Issue #2: Initialise file system layout before registering IPC handlers.
+  StorageService.init();
   registerIpcHandlers(ipcMain);
   createWindow();
 

@@ -10,5 +10,6 @@ artifacts/*
 !artifacts/.gitkeep
 exports/*
 !exports/.gitkeep
+tests/*.json
 .env
 .env.local

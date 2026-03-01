@@ -82,10 +82,35 @@ export type IpcRequest =
   | { type: "GetRunHistory"; payload: Record<string, never> }
   | { type: "SaveTest"; payload: SaveTestPayload }
   | { type: "ExportRun"; payload: { runId: string } }
-  | { type: "UpdateSession"; payload: { environment: string } };
+  | { type: "UpdateSession"; payload: { environment: string } }
+  | { type: "GetSettings"; payload: Record<string, never> }
+  | { type: "SaveSettings"; payload: Partial<Settings> };
 
 export type IpcChannel =
   | "executeCommand"
   | "executeTest"
   | "getRunHistory"
-  | "saveTest";
+  | "saveTest"
+  | "getSettings"
+  | "saveSettings";
+
+/**
+ * Persisted user settings (Issue #2).
+ * All paths default to sub-directories of Electron's userData folder.
+ * Setting a path to an empty string restores the default.
+ */
+export interface Settings {
+  schemaVersion: string;
+  /** Override for the tests directory. Empty string = use default. */
+  testsDir: string;
+  /** Override for the runs directory. Empty string = use default. */
+  runsDir: string;
+  /** Override for the auth directory. Empty string = use default. */
+  authDir: string;
+  /** Override for the artifacts directory. Empty string = use default. */
+  artifactsDir: string;
+  /** Override for the exports directory. Empty string = use default. */
+  exportsDir: string;
+  createdAt: string;
+  updatedAt: string;
+}

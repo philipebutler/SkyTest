@@ -1,22 +1,8 @@
 import type { IpcMain } from "electron";
 import * as fs from "fs";
 import * as path from "path";
-import type { Run, RunConfig, SaveTestPayload, TestCase } from "../../shared/types";
-
-const RUNS_DIR = path.join(process.cwd(), "runs");
-const TESTS_DIR = path.join(process.cwd(), "tests");
-
-function ensureRunsDir(): void {
-  if (!fs.existsSync(RUNS_DIR)) {
-    fs.mkdirSync(RUNS_DIR, { recursive: true });
-  }
-}
-
-function ensureTestsDir(): void {
-  if (!fs.existsSync(TESTS_DIR)) {
-    fs.mkdirSync(TESTS_DIR, { recursive: true });
-  }
-}
+import type { Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
+import { StorageService } from "../storage/StorageService";
 
 export function registerIpcHandlers(ipcMain: IpcMain): void {
   // Channel: executeCommand
@@ -38,9 +24,9 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     // TODO (#11): Wire Playwright executor to execute config.command
     run.status = "passed";
     run.finishedAt = new Date().toISOString();
-    ensureRunsDir();
+    const runsDir = StorageService.getInstance().runsDir;
     fs.writeFileSync(
-      path.join(RUNS_DIR, `${run.id}.json`),
+      path.join(runsDir, `${run.id}.json`),
       JSON.stringify(run, null, 2)
     );
     return run;
@@ -66,9 +52,9 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     // TODO (#11): Load TestCase from tests/ and wire Playwright executor
     run.status = "passed";
     run.finishedAt = new Date().toISOString();
-    ensureRunsDir();
+    const runsDir = StorageService.getInstance().runsDir;
     fs.writeFileSync(
-      path.join(RUNS_DIR, `${run.id}.json`),
+      path.join(runsDir, `${run.id}.json`),
       JSON.stringify(run, null, 2)
     );
     return run;
@@ -89,9 +75,9 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       createdAt: now,
       updatedAt: now,
     };
-    ensureTestsDir();
+    const testsDir = StorageService.getInstance().testsDir;
     fs.writeFileSync(
-      path.join(TESTS_DIR, `${testCase.id}.json`),
+      path.join(testsDir, `${testCase.id}.json`),
       JSON.stringify(testCase, null, 2)
     );
     return testCase;
@@ -100,14 +86,14 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
   // Channel: getRunHistory
   // Returns all persisted Run records from the runs/ directory.
   ipcMain.handle("getRunHistory", async (): Promise<Run[]> => {
-    ensureRunsDir();
+    const runsDir = StorageService.getInstance().runsDir;
     const files = fs
-      .readdirSync(RUNS_DIR)
+      .readdirSync(runsDir)
       .filter((f) => f.endsWith(".json"));
     const runs: Run[] = [];
     for (const f of files) {
       try {
-        const raw = fs.readFileSync(path.join(RUNS_DIR, f), "utf-8");
+        const raw = fs.readFileSync(path.join(runsDir, f), "utf-8");
         runs.push(JSON.parse(raw) as Run);
       } catch {
         console.warn(`[getRunHistory] Skipping corrupted run file: ${f}`);
@@ -116,4 +102,19 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
     return runs;
   });
+
+  // Channel: getSettings
+  // Returns the current persisted settings (Issue #2).
+  ipcMain.handle("getSettings", async (): Promise<Settings> => {
+    return StorageService.getInstance().getSettings();
+  });
+
+  // Channel: saveSettings
+  // Persists user-supplied path overrides and returns the updated settings (Issue #2).
+  ipcMain.handle(
+    "saveSettings",
+    async (_event, patch: Partial<Settings>): Promise<Settings> => {
+      return StorageService.getInstance().saveSettings(patch);
+    }
+  );
 }

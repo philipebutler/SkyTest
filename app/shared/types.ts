@@ -67,6 +67,12 @@ export interface ChatHistoryEntry {
   type?: "plan" | "clarification" | "error";
 }
 
+/** Result of DSL pre-execution validation (SPEC §6.3). */
+export interface DSLValidationResult {
+  valid: boolean;
+  errors: Array<{ stepIndex: number; message: string }>;
+}
+
 export interface Assertion {
   type: "textVisible" | "elementVisible" | "urlContains" | "countEquals";
   selector?: string;

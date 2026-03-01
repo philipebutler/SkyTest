@@ -14,9 +14,14 @@
     "typecheck": "tsc --noEmit",
     "test": "jest"
   },
-  "keywords": ["electron", "playwright", "testing"],
+  "keywords": [
+    "electron",
+    "playwright",
+    "testing"
+  ],
   "license": "MIT",
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
@@ -24,7 +29,9 @@
     "css-loader": "^6.0.0",
     "electron": "^35.7.5",
     "html-webpack-plugin": "^5.0.0",
+    "jest": "^30.2.0",
     "style-loader": "^3.0.0",
+    "ts-jest": "^29.4.6",
     "ts-loader": "^9.0.0",
     "typescript": "^5.0.0",
     "wait-on": "^7.0.0",
@@ -38,5 +45,11 @@
   },
   "overrides": {
     "serialize-javascript": "^7.0.3"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": ["<rootDir>/app"],
+    "testMatch": ["**/*.test.ts"]
   }
 }

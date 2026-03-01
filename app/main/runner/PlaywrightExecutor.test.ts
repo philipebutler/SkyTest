@@ -428,3 +428,154 @@ describe("PlaywrightExecutor – storageState session reuse (Issue #13)", () => 
     expect(newContextSpy).toHaveBeenCalledWith({});
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #23 – Retry & Flake Handling acceptance criteria
+// ---------------------------------------------------------------------------
+
+describe("PlaywrightExecutor – per-step retry (Issue #23)", () => {
+  it("retries a failing step and marks it passed when a later attempt succeeds", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    // First call fails, second call succeeds
+    mockPage.goto
+      .mockRejectedValueOnce(new Error("Flaky navigation"))
+      .mockResolvedValueOnce(undefined);
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "step retry pass",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp", undefined, undefined, 1, "step");
+
+    expect(result.stepResults[0].status).toBe("passed");
+    expect(result.stepResults[0].retryAttempts).toHaveLength(2);
+    expect(result.stepResults[0].retryAttempts![0].status).toBe("failed");
+    expect(result.stepResults[0].retryAttempts![0].attempt).toBe(1);
+    expect(result.stepResults[0].retryAttempts![1].status).toBe("passed");
+    expect(result.stepResults[0].retryAttempts![1].attempt).toBe(2);
+  });
+
+  it("marks step as failed when all retry attempts fail", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    mockPage.goto.mockRejectedValue(new Error("Always fails"));
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "step retry all fail",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp", undefined, undefined, 2, "step");
+
+    expect(result.stepResults[0].status).toBe("failed");
+    // 3 total attempts (1 original + 2 retries)
+    expect(result.stepResults[0].retryAttempts).toHaveLength(3);
+    expect(result.stepResults[0].retryAttempts!.every((a) => a.status === "failed")).toBe(true);
+  });
+
+  it("records the error message in each failed retry attempt", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    mockPage.goto.mockRejectedValue(new Error("Network error"));
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "retry error messages",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp", undefined, undefined, 1, "step");
+
+    expect(result.stepResults[0].retryAttempts).toBeDefined();
+    for (const attempt of result.stepResults[0].retryAttempts!) {
+      if (attempt.status === "failed") {
+        expect(attempt.error).toBe("Network error");
+      }
+    }
+  });
+
+  it("does not populate retryAttempts when retryCount is 0 (default)", async () => {
+    const executor = new PlaywrightExecutor();
+    setupExecutorWithMockPage(executor);
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "no retries",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp");
+
+    expect(result.stepResults[0].retryAttempts).toBeUndefined();
+  });
+
+  it("final status reflects retries: overall run passes when all steps eventually pass", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    // First navigate fails, second succeeds; click always passes
+    mockPage.goto
+      .mockRejectedValueOnce(new Error("Flaky"))
+      .mockResolvedValueOnce(undefined);
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "final status reflects retries",
+      steps: [
+        { action: "navigate", value: "https://example.com" },
+        { action: "click", selector: "#btn" },
+      ],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp", undefined, undefined, 1, "step");
+
+    expect(result.stepResults).toHaveLength(2);
+    expect(result.stepResults.every((r) => r.status === "passed")).toBe(true);
+  });
+});
+
+describe("PlaywrightExecutor – per-test retry (Issue #23)", () => {
+  it("retries the entire test when a step fails and succeeds on the next attempt", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    // First test attempt: navigate fails; second attempt: navigate passes
+    mockPage.goto
+      .mockRejectedValueOnce(new Error("Flaky navigation"))
+      .mockResolvedValueOnce(undefined);
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "test retry pass",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp", undefined, undefined, 1, "test");
+
+    expect(result.stepResults[0].status).toBe("passed");
+  });
+
+  it("marks the test as failed when all test-level retries are exhausted", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    mockPage.goto.mockRejectedValue(new Error("Always fails"));
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "test retry all fail",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp", undefined, undefined, 2, "test");
+
+    expect(result.stepResults[0].status).toBe("failed");
+  });
+});

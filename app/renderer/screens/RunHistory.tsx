@@ -57,6 +57,7 @@ export default function RunHistory(): React.ReactElement {
 
   // Selected run for the detail panel
   const [selectedRun, setSelectedRun] = useState<Run | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
 
   const loadRuns = useCallback(async () => {
     setLoading(true);
@@ -95,6 +96,25 @@ export default function RunHistory(): React.ReactElement {
     setFilterBrowser("");
     setFilterDate("");
   };
+
+  const exportRun = useCallback(async (run: Run) => {
+    setExportStatus("Exporting…");
+    try {
+      const result = (await window.skytest.invoke("exportRun", { runId: run.id })) as {
+        mdPath: string;
+        jsonPath: string;
+      };
+      setExportStatus(`Exported to: ${result.mdPath}`);
+    } catch (err) {
+      const msg = String(err);
+      // Treat "cancelled by user" as a silent no-op.
+      if (msg.includes("cancelled")) {
+        setExportStatus(null);
+      } else {
+        setExportStatus(`Export failed: ${msg}`);
+      }
+    }
+  }, []);
 
   const hasFilters = filterEnv || filterBrowser || filterDate;
 
@@ -244,14 +264,25 @@ export default function RunHistory(): React.ReactElement {
             <div style={styles.detailHeader}>
               <h3 style={styles.detailTitle}>Run Details</h3>
               <button
+                style={styles.exportButton}
+                onClick={() => void exportRun(selectedRun)}
+                title="Export run to Markdown + JSON"
+                type="button"
+              >
+                ⬇ Export
+              </button>
+              <button
                 style={styles.closeButton}
-                onClick={() => setSelectedRun(null)}
+                onClick={() => { setSelectedRun(null); setExportStatus(null); }}
                 title="Close"
                 type="button"
               >
                 ✕
               </button>
             </div>
+            {exportStatus && (
+              <p style={styles.exportStatus}>{exportStatus}</p>
+            )}
 
             {/* Metadata */}
             <div style={styles.detailMeta}>
@@ -588,6 +619,22 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "1rem",
     flexShrink: 0,
     padding: "0 0.2rem",
+  },
+  exportButton: {
+    backgroundColor: "transparent",
+    border: "1px solid #555",
+    borderRadius: "4px",
+    color: "#9cdcfe",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    flexShrink: 0,
+    padding: "0.2rem 0.6rem",
+  },
+  exportStatus: {
+    fontSize: "0.72rem",
+    color: "#888",
+    margin: 0,
+    wordBreak: "break-all" as const,
   },
   detailMeta: {
     display: "flex",

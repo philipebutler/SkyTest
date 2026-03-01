@@ -175,6 +175,7 @@ export type IpcChannel =
   | "saveTest"
   | "listTests"
   | "deleteTest"
+  | "exportRun"
   | "getSettings"
   | "saveSettings"
   | "chat:send"

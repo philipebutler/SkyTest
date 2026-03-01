@@ -53,7 +53,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
         const executionResult = await executor.execute(
           dslPlan,
           (payload.browser ?? "chromium") as BrowserType,
-          false,
+          payload.headed ?? false,
           storage.artifactsDir
         );
         const allPassed = executionResult.stepResults.every((r) => r.status !== "failed");

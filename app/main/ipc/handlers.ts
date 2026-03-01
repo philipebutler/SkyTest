@@ -156,11 +156,15 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
         browserToUse,
         run.headed,
         storage.artifactsDir,
-        storageStatePath
+        storageStatePath,
+        testCase.assertions
       );
       run.stepResults = executionResult.stepResults;
+      run.assertionResults = executionResult.assertionResults;
       run.artifacts = executionResult.artifacts;
-      run.status = executionResult.stepResults.some((r) => r.status === "failed") ? "failed" : "passed";
+      const stepsFailed = executionResult.stepResults.some((r) => r.status === "failed");
+      const assertionsFailed = executionResult.assertionResults.some((r) => r.status === "failed");
+      run.status = stepsFailed || assertionsFailed ? "failed" : "passed";
     } catch (err) {
       run.status = "failed";
       console.error("[executeTest] Execution error:", err);

@@ -4,6 +4,7 @@ import * as path from "path";
 import { chromium } from "playwright";
 import type { BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
+import { TestCaseRepository } from "../storage/TestCaseRepository";
 import { CopilotAdapter } from "../llm/CopilotAdapter";
 import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
 import { validateDSL, validateDSLPolicy } from "../validation/dslValidator";
@@ -138,11 +139,11 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     // Load TestCase from tests/ directory and execute with the stored browser (Issue #9)
     try {
       const testsDir = StorageService.getInstance().testsDir;
-      const testFilePath = path.join(testsDir, `${payload.testId}.json`);
-      if (!fs.existsSync(testFilePath)) {
+      const testRepo = new TestCaseRepository(testsDir);
+      const testCase = testRepo.load(payload.testId);
+      if (!testCase) {
         throw new Error(`Test file not found: ${payload.testId}`);
       }
-      const testCase = JSON.parse(fs.readFileSync(testFilePath, "utf-8")) as TestCase;
       // Use browser from TestCase metadata if available, otherwise default to chromium
       const browserToUse: BrowserType = testCase.browser ?? "chromium";
       run.browser = browserToUse;
@@ -189,12 +190,23 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       createdAt: now,
       updatedAt: now,
     };
-    const testsDir = StorageService.getInstance().testsDir;
-    fs.writeFileSync(
-      path.join(testsDir, `${testCase.id}.json`),
-      JSON.stringify(testCase, null, 2)
-    );
+    const testRepo = new TestCaseRepository(StorageService.getInstance().testsDir);
+    testRepo.save(testCase);
     return testCase;
+  });
+
+  // Channel: listTests
+  // Returns all persisted TestCase records from the tests/ directory (Issue #15).
+  ipcMain.handle("listTests", async (): Promise<TestCase[]> => {
+    const testRepo = new TestCaseRepository(StorageService.getInstance().testsDir);
+    return testRepo.list();
+  });
+
+  // Channel: deleteTest
+  // Deletes a TestCase by ID from the tests/ directory (Issue #15).
+  ipcMain.handle("deleteTest", async (_event, payload: { testId: string }): Promise<void> => {
+    const testRepo = new TestCaseRepository(StorageService.getInstance().testsDir);
+    testRepo.delete(payload.testId);
   });
 
   // Channel: getRunHistory

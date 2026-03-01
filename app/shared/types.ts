@@ -153,6 +153,8 @@ export type IpcRequest =
   | { type: "ExecuteTest"; payload: { testId: string } }
   | { type: "GetRunHistory"; payload: Record<string, never> }
   | { type: "SaveTest"; payload: SaveTestPayload }
+  | { type: "ListTests"; payload: Record<string, never> }
+  | { type: "DeleteTest"; payload: { testId: string } }
   | { type: "ExportRun"; payload: { runId: string } }
   | { type: "UpdateSession"; payload: { environment: string } }
   | { type: "GetSettings"; payload: Record<string, never> }
@@ -163,6 +165,8 @@ export type IpcChannel =
   | "executeTest"
   | "getRunHistory"
   | "saveTest"
+  | "listTests"
+  | "deleteTest"
   | "getSettings"
   | "saveSettings"
   | "chat:send"

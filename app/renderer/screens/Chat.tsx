@@ -23,6 +23,8 @@ interface Message {
   streamId?: string;
   /** Marks this message as a clarification request from the LLM (Issue #6) */
   isClarification?: boolean;
+  /** Marks this message as an execution-blocked error (Issue #8) */
+  isExecutionError?: boolean;
 }
 
 interface Props {
@@ -51,6 +53,28 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
   // inputRef lets handleRun always read the latest input without being in its deps
   const inputRef = useRef(input);
   inputRef.current = input;
+
+  // Issue #8: Listen for execution errors (schema/policy violations) pushed from the main process.
+  // These surface as visible error messages in the transcript so the user knows why execution was blocked.
+  useEffect(() => {
+    const unsub = window.skytest.on("chat:executionError", (data: unknown) => {
+      const { reason, errors } = data as {
+        reason: "schema" | "policy";
+        errors: Array<{ stepIndex: number; message: string }>;
+      };
+      const label = reason === "policy" ? "Tool policy violation" : "DSL schema error";
+      const details = errors.map((e) => `  • ${e.message}`).join("\n");
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "result" as const,
+          text: `⛔ Execution blocked – ${label}\n\nThe plan was not executed because one or more steps are not permitted:\n${details}\n\nSwitch to a more permissive tool policy or adjust your request.`,
+          isExecutionError: true,
+        },
+      ]);
+    });
+    return unsub;
+  }, []);
 
   // Auto-scroll transcript to bottom on every new message
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -223,7 +247,9 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
               ...(msg.role === "user"
                 ? styles.userMessage
                 : msg.role === "result"
-                ? styles.resultMessage
+                ? msg.isExecutionError
+                  ? styles.executionErrorMessage
+                  : styles.resultMessage
                 : msg.isClarification
                 ? styles.clarificationMessage
                 : styles.assistantMessage),
@@ -233,12 +259,14 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
               {msg.role === "user"
                 ? "You"
                 : msg.role === "result"
-                ? "Result"
+                ? msg.isExecutionError
+                  ? "⛔ Execution Blocked"
+                  : "Result"
                 : msg.isClarification
                 ? "❓ Needs Clarification"
                 : "Assistant"}
             </span>
-            <span style={styles.text}>{msg.text}</span>
+            <span style={msg.isExecutionError ? styles.preWrapText : styles.text}>{msg.text}</span>
           </div>
         ))}
       </div>
@@ -342,6 +370,12 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #3a5c3a",
     color: "#a8d5a2",
   },
+  executionErrorMessage: {
+    alignSelf: "flex-start",
+    backgroundColor: "#2d1a1a",
+    border: "1px solid #7a3a3a",
+    color: "#f4a4a4",
+  },
   role: {
     fontSize: "0.7rem",
     opacity: 0.7,
@@ -350,6 +384,11 @@ const styles: Record<string, React.CSSProperties> = {
   text: {
     fontSize: "0.875rem",
     lineHeight: "1.4",
+  },
+  preWrapText: {
+    fontSize: "0.875rem",
+    lineHeight: "1.4",
+    whiteSpace: "pre-wrap",
   },
   inputRow: {
     display: "flex",

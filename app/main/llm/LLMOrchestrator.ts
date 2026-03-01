@@ -83,6 +83,8 @@ export interface ChatSendPayload {
   toolPolicy: ToolPolicy;
   environment: string;
   browser: string;
+  /** Whether to run the browser in headed (visible) mode (Issue #10). */
+  headed?: boolean;
   baseUrl?: string;
   priorSteps?: import("../../shared/types").ActionStep[];
   /** Conversation history used to resume flow after a clarification (Issue #6). */

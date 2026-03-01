@@ -102,6 +102,7 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
         toolPolicy: config.toolPolicy,
         environment: config.environment,
         browser: config.browser,
+        headed: config.headed,
         chatHistory: chatHistory.length > 0 ? chatHistory : undefined,
       })) as { streamId: string };
 
@@ -306,7 +307,9 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
       <div style={styles.footer}>
         <span style={styles.hint}>
           Tool policy: <strong>{config.toolPolicy}</strong> · Browser:{" "}
-          <strong>{config.browser}</strong> · Env: <strong>{config.environment}</strong>
+          <strong>{config.browser}</strong> · Mode:{" "}
+          <strong>{config.headed ? "headed" : "headless"}</strong> · Env:{" "}
+          <strong>{config.environment}</strong>
         </span>
         {/* SPEC §5.2: Save as Test button */}
         <button

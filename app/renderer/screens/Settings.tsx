@@ -53,6 +53,11 @@ export default function SettingsScreen(): React.ReactElement {
         lastHeaded: s.lastHeaded,
         lastAuthProfile: s.lastAuthProfile,
         lastToolPolicy: s.lastToolPolicy,
+        retryCount: s.retryCount,
+        retryMode: s.retryMode,
+        llmEndpoint: s.llmEndpoint,
+        llmApiKey: s.llmApiKey,
+        llmModel: s.llmModel,
       });
       setAuthEnv(s.lastEnvironment ?? "default");
     } catch (err) {
@@ -64,7 +69,7 @@ export default function SettingsScreen(): React.ReactElement {
     void load();
   }, [load]);
 
-  const handleChange = (key: keyof Settings, value: string | boolean) => {
+  const handleChange = (key: keyof Settings, value: string | boolean | number) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
     setStatus("idle");
   };
@@ -246,6 +251,112 @@ export default function SettingsScreen(): React.ReactElement {
 
       {error && <p style={styles.errorText}>{error}</p>}
 
+      {/* LLM API Configuration (Issue #5) */}
+      <h3 style={styles.sectionHeading}>LLM API Configuration</h3>
+      <p style={styles.subheading}>
+        Configure an OpenAI-compatible endpoint to enable chat-driven automation. The API key is
+        stored locally and never sent as part of LLM request payloads.
+      </p>
+      <div style={styles.form}>
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="setting-llmEndpoint">
+            API Base URL
+          </label>
+          <p style={styles.hint}>
+            OpenAI-compatible base URL, e.g. <code style={styles.inlineCode}>https://api.openai.com/v1</code>
+          </p>
+          <input
+            id="setting-llmEndpoint"
+            style={styles.input}
+            type="text"
+            value={(draft.llmEndpoint as string) ?? ""}
+            onChange={(e) => handleChange("llmEndpoint", e.target.value)}
+            placeholder="https://api.openai.com/v1"
+            aria-label="LLM API base URL"
+            spellCheck={false}
+          />
+        </div>
+
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="setting-llmApiKey">
+            API Key
+          </label>
+          <p style={styles.hint}>Your provider API key. Stored locally; never logged or transmitted to the LLM.</p>
+          <input
+            id="setting-llmApiKey"
+            style={styles.input}
+            type="password"
+            value={(draft.llmApiKey as string) ?? ""}
+            onChange={(e) => handleChange("llmApiKey", e.target.value)}
+            placeholder="sk-…"
+            aria-label="LLM API key"
+            autoComplete="off"
+          />
+        </div>
+
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="setting-llmModel">
+            Model
+          </label>
+          <p style={styles.hint}>Model name passed to the API, e.g. <code style={styles.inlineCode}>gpt-4o</code></p>
+          <input
+            id="setting-llmModel"
+            style={styles.input}
+            type="text"
+            value={(draft.llmModel as string) ?? ""}
+            onChange={(e) => handleChange("llmModel", e.target.value)}
+            placeholder="gpt-4o"
+            aria-label="LLM model"
+            spellCheck={false}
+          />
+        </div>
+      </div>
+
+      {/* Retry Settings (Issue #23) */}
+      <h3 style={styles.sectionHeading}>Retry Settings</h3>
+      <p style={styles.subheading}>
+        Default retry behaviour for test and step execution. Individual tests can override these
+        values.
+      </p>
+      <div style={styles.form}>
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="setting-retryCount">
+            Retry count
+          </label>
+          <p style={styles.hint}>Number of additional attempts after a failure (0 = no retries).</p>
+          <input
+            id="setting-retryCount"
+            style={{ ...styles.input, width: "80px" }}
+            type="number"
+            min={0}
+            max={10}
+            value={(draft.retryCount as number) ?? 0}
+            onChange={(e) => handleChange("retryCount", parseInt(e.target.value, 10) || 0)}
+            aria-label="Retry count"
+          />
+        </div>
+
+        <div style={styles.field}>
+          <label style={styles.label} htmlFor="setting-retryMode">
+            Retry mode
+          </label>
+          <p style={styles.hint}>
+            <strong>step</strong>: retry only the failed step.{" "}
+            <strong>test</strong>: restart the full test from the beginning.
+          </p>
+          <select
+            id="setting-retryMode"
+            style={styles.select}
+            value={(draft.retryMode as string) ?? "step"}
+            onChange={(e) => handleChange("retryMode", e.target.value as "step" | "test")}
+            aria-label="Retry mode"
+          >
+            <option value="step">step</option>
+            <option value="test">test</option>
+          </select>
+        </div>
+      </div>
+
       {/* Manual Login / Update Session section (Issue #13) */}
       <h3 style={styles.sectionHeading}>Manual Login / Update Session</h3>
       <p style={styles.subheading}>
@@ -415,5 +526,13 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#d4d4d4",
     padding: "0.4rem 0.6rem",
     fontSize: "0.8rem",
+  },
+  inlineCode: {
+    backgroundColor: "#2d2d2d",
+    borderRadius: "3px",
+    fontFamily: "monospace",
+    fontSize: "0.78rem",
+    padding: "0.05rem 0.3rem",
+    color: "#9cdcfe",
   },
 };

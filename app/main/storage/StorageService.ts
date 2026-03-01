@@ -189,6 +189,9 @@ export class StorageService {
           lastToolPolicy: parsed.lastToolPolicy ?? defaults.lastToolPolicy,
           retryCount: parsed.retryCount ?? defaults.retryCount,
           retryMode: parsed.retryMode ?? defaults.retryMode,
+          llmEndpoint: parsed.llmEndpoint ?? defaults.llmEndpoint,
+          llmApiKey: parsed.llmApiKey ?? defaults.llmApiKey,
+          llmModel: parsed.llmModel ?? defaults.llmModel,
           createdAt: parsed.createdAt ?? now,
           updatedAt: parsed.updatedAt ?? now,
         };
@@ -215,6 +218,9 @@ export class StorageService {
       lastToolPolicy: "read-only",
       retryCount: 0,
       retryMode: "step",
+      llmEndpoint: "",
+      llmApiKey: "",
+      llmModel: "",
       createdAt: now,
       updatedAt: now,
     };

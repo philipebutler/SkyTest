@@ -56,6 +56,15 @@ export interface LLMStreamToken {
   streamId: string;
   token: string;
   done: boolean;
+  /** Present only on the terminal (done=true) token. Carries the classified response type. */
+  responseType?: "plan" | "clarification" | "error";
+}
+
+/** A single entry in the conversation history used to resume flow after clarification (Issue #6). */
+export interface ChatHistoryEntry {
+  role: "user" | "assistant";
+  content: string;
+  type?: "plan" | "clarification" | "error";
 }
 
 export interface Assertion {

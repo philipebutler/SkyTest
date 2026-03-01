@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { AppConfig } from "../App";
-import type { ActionStep, TestCase } from "../../shared/types";
+import type { ActionStep, ChatHistoryEntry, TestCase } from "../../shared/types";
 
 // Typed IPC bridge exposed by preload.ts
 declare global {
@@ -21,6 +21,8 @@ interface Message {
   streaming?: boolean;
   /** Correlates a streaming message to its stream session */
   streamId?: string;
+  /** Marks this message as a clarification request from the LLM (Issue #6) */
+  isClarification?: boolean;
 }
 
 interface Props {
@@ -38,6 +40,13 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
+  /**
+   * Issue #6: Clarification enforcement state.
+   * - awaitingClarification: true when the LLM asked a question and we must not execute.
+   * - chatHistory: accumulates the conversation so the next request includes context to resolve ambiguity.
+   */
+  const [awaitingClarification, setAwaitingClarification] = useState(false);
+  const [chatHistory, setChatHistory] = useState<ChatHistoryEntry[]>([]);
 
   // inputRef lets handleRun always read the latest input without being in its deps
   const inputRef = useRef(input);
@@ -62,13 +71,18 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
     let unsubscribe: (() => void) | null = null;
 
     try {
-      // Issue #5: Send prompt to LLM Orchestrator via chat:send and stream tokens back
+      // Issue #5: Send prompt to LLM Orchestrator via chat:send and stream tokens back.
+      // Issue #6: Include chatHistory when resuming after a clarification so the LLM has context.
       const { streamId } = (await window.skytest.invoke("chat:send", {
         prompt: command,
         toolPolicy: config.toolPolicy,
         environment: config.environment,
         browser: config.browser,
+        chatHistory: chatHistory.length > 0 ? chatHistory : undefined,
       })) as { streamId: string };
+
+      // Capture the user message for history (will be committed on done)
+      const userEntry: ChatHistoryEntry = { role: "user", content: command };
 
       // Accumulate streamed tokens in a temporary "streaming" message
       let accumulated = "";
@@ -80,7 +94,12 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
       unsubscribe = window.skytest.on(
         "chat:stream",
         (data: unknown) => {
-          const { streamId: sid, token, done } = data as { streamId: string; token: string; done: boolean };
+          const { streamId: sid, token, done, responseType } = data as {
+            streamId: string;
+            token: string;
+            done: boolean;
+            responseType?: "plan" | "clarification" | "error";
+          };
           if (sid !== streamId) return;
 
           if (done) {
@@ -88,6 +107,32 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
               unsubscribe();
               unsubscribe = null;
             }
+
+            // Issue #6: Classify the completed response and enforce clarification flow.
+            const isClarification = responseType === "clarification";
+            setMessages((prev) =>
+              prev.map((m) =>
+                (m as { streamId?: string }).streamId === streamId
+                  ? { ...m, streaming: false, isClarification }
+                  : m
+              )
+            );
+
+            if (isClarification) {
+              // Persist this exchange in history so the next request can resolve the ambiguity.
+              const assistantEntry: ChatHistoryEntry = {
+                role: "assistant",
+                content: accumulated,
+                type: "clarification",
+              };
+              setChatHistory((prev) => [...prev, userEntry, assistantEntry]);
+              setAwaitingClarification(true);
+            } else {
+              // Plan or error: clear history and clarification flag.
+              setChatHistory([]);
+              setAwaitingClarification(false);
+            }
+
             setRunning(false);
             return;
           }
@@ -113,7 +158,7 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
       ]);
       setRunning(false);
     }
-  }, [config, setMessages, setInput, setRunning]);
+  }, [config, chatHistory]);
 
   // Register this screen's run handler so the TopBar Run button can trigger it
   useEffect(() => {
@@ -179,16 +224,31 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
                 ? styles.userMessage
                 : msg.role === "result"
                 ? styles.resultMessage
+                : msg.isClarification
+                ? styles.clarificationMessage
                 : styles.assistantMessage),
             }}
           >
             <span style={styles.role}>
-              {msg.role === "user" ? "You" : msg.role === "result" ? "Result" : "Assistant"}
+              {msg.role === "user"
+                ? "You"
+                : msg.role === "result"
+                ? "Result"
+                : msg.isClarification
+                ? "❓ Needs Clarification"
+                : "Assistant"}
             </span>
             <span style={styles.text}>{msg.text}</span>
           </div>
         ))}
       </div>
+
+      {/* Issue #6: Show clarification banner when the system is awaiting user input */}
+      {awaitingClarification && (
+        <div style={styles.clarificationBanner}>
+          ⚠️ Please answer the question above before execution resumes. No Playwright actions will run until clarified.
+        </div>
+      )}
 
       <div style={styles.inputRow}>
         <textarea
@@ -196,7 +256,11 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Enter a command… (Ctrl+Enter or ⌘+Enter to send)"
+          placeholder={
+            awaitingClarification
+              ? "Type your clarification and press Send…"
+              : "Enter a command… (Ctrl+Enter or ⌘+Enter to send)"
+          }
           aria-label="Command input. Press Ctrl+Enter or Command+Enter to send."
           rows={3}
           disabled={running}
@@ -265,6 +329,12 @@ const styles: Record<string, React.CSSProperties> = {
   assistantMessage: {
     alignSelf: "flex-start",
     backgroundColor: "#2d2d2d",
+  },
+  clarificationMessage: {
+    alignSelf: "flex-start",
+    backgroundColor: "#3d2e00",
+    border: "1px solid #7a5c00",
+    color: "#ffd580",
   },
   resultMessage: {
     alignSelf: "flex-start",
@@ -335,5 +405,13 @@ const styles: Record<string, React.CSSProperties> = {
     borderColor: "#555",
     color: "#999",
     cursor: "not-allowed",
+  },
+  clarificationBanner: {
+    backgroundColor: "#3d2e00",
+    border: "1px solid #7a5c00",
+    borderRadius: "4px",
+    color: "#ffd580",
+    fontSize: "0.78rem",
+    padding: "0.4rem 0.75rem",
   },
 };

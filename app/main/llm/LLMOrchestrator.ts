@@ -2,6 +2,7 @@ import type { WebContents } from "electron";
 import type { LLMAdapter } from "./LLMAdapter";
 import type {
   ActionVerb,
+  ChatHistoryEntry,
   DSLPlan,
   LLMRequest,
   LLMResponse,
@@ -33,6 +34,18 @@ Rules:
 - If intent is ambiguous, output CLARIFY: followed by your question
 - The base URL for this session is: ${baseUrl}
 - Do not guess at selectors; use descriptive selectors the user would recognize`;
+}
+
+/**
+ * Builds the user message, prepending conversation history when resuming from a clarification (Issue #6).
+ * The LLM receives the full prior exchange so it can resolve ambiguity without guessing.
+ */
+function buildUserMessage(prompt: string, chatHistory?: ChatHistoryEntry[]): string {
+  if (!chatHistory || chatHistory.length === 0) return prompt;
+  const historyText = chatHistory
+    .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${h.content}`)
+    .join("\n");
+  return `Prior conversation:\n${historyText}\n\nUser: ${prompt}`;
 }
 
 /**
@@ -72,6 +85,8 @@ export interface ChatSendPayload {
   browser: string;
   baseUrl?: string;
   priorSteps?: import("../../shared/types").ActionStep[];
+  /** Conversation history used to resume flow after a clarification (Issue #6). */
+  chatHistory?: ChatHistoryEntry[];
 }
 
 /**
@@ -105,7 +120,7 @@ export class LLMOrchestrator {
 
     const request: LLMRequest = {
       systemPrompt: buildSystemPrompt(allowedVerbs, baseUrl),
-      userMessage: payload.prompt,
+      userMessage: buildUserMessage(payload.prompt, payload.chatHistory),
       toolPolicy: payload.toolPolicy,
       allowedVerbs,
       environment: payload.environment,
@@ -138,8 +153,8 @@ export class LLMOrchestrator {
     console.log(`[LLMOrchestrator] streamId=${streamId} type=${response.type}`);
     console.log(`[LLMOrchestrator] rawText: ${response.rawText}`);
 
-    // Send terminal token to signal end of stream
-    const doneToken: LLMStreamToken = { streamId, token: "", done: true };
+    // Send terminal token to signal end of stream, carrying the response classification
+    const doneToken: LLMStreamToken = { streamId, token: "", done: true, responseType: response.type };
     if (!sender.isDestroyed()) {
       sender.send("chat:stream", doneToken);
     }

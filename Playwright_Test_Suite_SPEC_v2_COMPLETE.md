@@ -1,57 +1,54 @@
-
-# Playwright Chat Runner – SPEC v2 (Complete)
-Standalone Electron-Based LLM-Assisted Test Automation Suite
-
----
-
 ## 1. Purpose
 
-This document defines the complete specification for **Playwright Chat Runner v2**, a standalone Electron-based application for:
+This specification defines **Playwright Chat Runner v2**, a standalone Electron-based application for:
 
-- Exploratory automation
+- Exploratory browser automation
 - User Acceptance Testing (UAT)
 - Regression testing
-- LLM-assisted test authoring and maintenance
+- LLM-assisted test authoring, execution, and maintenance
 
-The system combines:
-- Human-readable intent
-- LLM planning (Copilot or compatible model)
-- Deterministic Playwright execution
-- Explicit assertions
-- Explainable, auditable results
+The system converts **human intent → LLM planning → deterministic execution → explainable results**, while enforcing safety, auditability, and correctness.
 
-This specification is written to eliminate ambiguity and support **Copilot-driven development**.
+This document is the **authoritative source of truth** for:
+- Architecture
+- UI/UX workflows
+- Execution semantics
+- Safety and governance
+- Acceptance criteria
 
 ---
 
-## 2. Design Principles
+## 2. Core Design Principles (Non-Negotiable)
 
-1. **Clarification over assumption**
-2. **Deterministic execution**
-3. **Explicit safety controls**
-4. **Separation of intent, planning, and execution**
-5. **Auditability**
-6. **Local-first execution**
+1. Clarification over assumption
+2. Deterministic execution
+3. Explicit assertions determine pass/fail
+4. No UI controls without real functionality
+5. No secrets sent to the LLM
+6. Local-first, auditable operation
+7. Typed contracts between UI and backend
+8. Spec intent must be provably implemented
 
 ---
 
 ## 3. Non-Goals (v2)
 
-- No mobile native testing
-- No desktop native testing
-- No background scheduling
-- No credential storage beyond local secure storage
-- No autonomous destructive actions
+- Native mobile testing
+- Native desktop application testing
+- Autonomous scheduling
+- Cloud execution or SaaS dependency
+- Storing credentials in plaintext
+- Self-modifying test behavior
 
 ---
 
-## 4. Architecture Overview
+## 4. System Architecture (Electron)
 
 ```
 ┌─────────────────────────────────────────────┐
-│ Electron App                                │
+│ Electron Application                        │
 │                                             │
-│ UI (Renderer Process)                       │
+│ Renderer Process (UI)                       │
 │  - Chat                                    │
 │  - Test Library                             │
 │  - Run History                              │
@@ -60,7 +57,7 @@ This specification is written to eliminate ambiguity and support **Copilot-drive
 │                                             │
 │ Main Process (Node.js)                      │
 │  - LLM Orchestration                        │
-│  - Test Runner                              │
+│  - Action/Test DSL Validation               │
 │  - Playwright Executor                      │
 │  - Assertion Engine                         │
 │  - Artifact Manager                         │
@@ -76,7 +73,7 @@ This specification is written to eliminate ambiguity and support **Copilot-drive
 
 ---
 
-## 5. UI / UX Specification (Detailed)
+## 5. UI / UX Specification (Fully Defined)
 
 ### 5.1 Global Layout
 
@@ -87,7 +84,7 @@ This specification is written to eliminate ambiguity and support **Copilot-drive
 ├───────────────┬──────────────────────────────────────────────┤
 │ Sidebar       │ Main Workspace                               │
 │               │                                              │
-│ • Chat        │ Dynamic content area                         │
+│ • Chat        │ Context-dependent content                    │
 │ • Tests       │                                              │
 │ • Runs        │                                              │
 │ • Record      │                                              │
@@ -95,60 +92,56 @@ This specification is written to eliminate ambiguity and support **Copilot-drive
 └───────────────┴──────────────────────────────────────────────┘
 ```
 
-Top Bar selections apply to the **next execution only**.
+Top Bar Rules:
+- All selections apply to the next execution only
+- Active selections must be visibly indicated
+- Invalid combinations must be blocked with explanation
 
 ---
 
-### 5.2 Chat Mode Workflow
+### 5.2 Chat Mode
 
-**User Flow**
-1. User selects Chat
-2. Enters natural language command
-3. Presses Send
-4. System sends command + enabled tools to LLM
-5. LLM responds with:
-   - Clarifying question OR
-   - Action DSL plan
-6. Playwright executes
-7. Results returned to chat
+Workflow:
+1. User enters command
+2. Sent to LLM with enabled tools
+3. LLM returns clarification or Action DSL
+4. Steps validated and executed
+5. Results rendered in chat
 
-**UI Requirements**
-- Transcript view
+UI Requirements:
+- Scrollable transcript
 - Multi-line input
-- “Save as Test” button
-- Tool Policy indicator
+- Save as Test button
+- Tool policy indicator
 
 ---
 
-### 5.3 Test Library Workflow
+### 5.3 Test Library Mode
 
-**User Flow**
-1. User selects Tests
-2. Views folder/tag tree
-3. Selects or creates test
-4. Edits steps/assertions
-5. Saves test
-6. Runs test
+Workflow:
+1. Browse or create test
+2. Edit steps and assertions
+3. Save test
+4. Execute test
+5. Review results
 
-**UI Requirements**
-- Folder structure
-- Tag filtering
-- Test metadata editor
+UI Requirements:
+- Folder and tag navigation
 - Assertion builder
-- JSON/DSL editor (advanced)
+- DSL editor
+- Pass/fail visualization
 
 ---
 
-### 5.4 Run History Workflow
+### 5.4 Run History Mode
 
-**User Flow**
-1. User selects Runs
-2. Views list of runs
-3. Selects a run
-4. Reviews summary
-5. Drills into steps
+Workflow:
+1. Select run
+2. View summary
+3. Inspect steps
+4. View artifacts
 
-**UI Requirements**
+UI Requirements:
 - Status icons
 - Filters
 - Timeline view
@@ -156,18 +149,55 @@ Top Bar selections apply to the **next execution only**.
 
 ---
 
-### 5.5 Settings Workflow
+### 5.5 Record Mode
+
+See Addendum A.
+
+---
+
+### 5.6 Settings Mode
 
 Sections:
 - Environments
 - Browsers
-- Auth profiles
+- Authentication
 - Tool policies
-- Export settings
+- Export defaults
 
 ---
 
-## 6. Tool Policy System
+## 6. UI Control Wiring (Governance)
+
+### 6.1 Typed IPC Contracts
+
+All UI actions must map to typed IPC requests.
+
+```ts
+type IpcRequest =
+  | { type: "ExecuteCommand"; payload: RunConfig }
+  | { type: "ExecuteTest"; payload: { testId: string } }
+  | { type: "ExportRun"; payload: { runId: string } }
+  | { type: "UpdateSession"; payload: { environment: string } };
+```
+
+Rules:
+- No string-based IPC
+- No UI controls without handlers
+- Missing handlers fail fast
+
+---
+
+### 6.2 UI Control Matrix
+
+A file UI_CONTROL_MATRIX.md must exist listing all controls and handlers.
+
+CI must validate:
+- Every IPC event has a handler
+- Every handler has a UI control
+
+---
+
+## 7. Tool Policy System
 
 Policies:
 - Read-only
@@ -175,173 +205,132 @@ Policies:
 - Full
 
 Rules:
-- LLM may only plan using enabled tools
-- Violations require clarification
+- Default is Read-only
+- Full requires explicit confirmation
+- Violations trigger clarification
 
 ---
 
-## 7. Authentication Strategy
+## 8. Authentication Strategy
 
-Primary:
-- Manual login + storageState.json
+Default:
+- Manual login via headed browser
+- Save storageState.json per environment
+- Reuse for future runs
 
-Secondary:
-- Service account (optional)
-
-Rules:
-- Credentials never sent to LLM
-- Sessions scoped per environment
+Prohibited:
+- Credentials in prompts
+- Credentials in logs
 
 ---
 
-## 8. Core Data Models
+## 9. Data Models
 
-### 8.1 TestCase
-
+### TestCase
 ```ts
 interface TestCase {
   id: string;
   name: string;
-  description?: string;
   tags: string[];
-  engine: "playwright";
   preconditions: ActionStep[];
   steps: ActionStep[];
   assertions: Assertion[];
 }
 ```
 
-### 8.2 Run
-
+### Run
 ```ts
 interface Run {
   id: string;
-  testIds: string[];
   environment: string;
-  browser: "chromium" | "firefox" | "webkit";
+  browser: string;
   status: "passed" | "failed";
   startedAt: string;
   finishedAt?: string;
 }
 ```
 
-### 8.3 StepResult
-
-```ts
-interface StepResult {
-  index: number;
-  action: string;
-  status: "passed" | "failed";
-  durationMs: number;
-  artifacts: string[];
-}
-```
-
 ---
 
-## 9. Assertion Engine
+## 10. Assertion Engine
 
-Supported assertions:
+Assertions define pass/fail:
 - textVisible
 - elementVisible
 - urlContains
 - countEquals
-- screenshotMatches (future)
-
-Assertions define pass/fail.
 
 ---
 
-## 10. LLM Behavior Rules
+## 11. LLM Behavior Rules
 
-- Must output valid DSL or clarification
-- Must not guess
-- Must not emit code
-- Must respect tool policy
-
----
-
-## 11. Acceptance Criteria (Global)
-
-- Tests are repeatable
-- Failures produce artifacts
-- UI workflows are deterministic
-- No secrets exposed
-- Exports are reproducible
+- Output DSL or clarification only
+- Never guess
+- Never emit executable code
+- Respect tool policy
 
 ---
 
-## 12. MVP Roadmap
+## 12. Spec Compliance Verification
 
-### MVP1
-- Chat execution
+Golden path scenarios must be automated:
+1. Chat execution
+2. Load TXT execution
+3. Save and run test
+4. Auth reuse
+5. Export run
+
+No-stubs rule enforced.
+
+---
+
+## 13. MVP Roadmap
+
+MVP1:
+- Chat runner
 - Browser selection
 - Manual auth
-- Action DSL
 
-### MVP2
-- Test library
+MVP2:
+- Tests
 - Assertions
-- Run history
+- Runs
 
-### MVP3
+MVP3:
 - Record mode
 - Flake handling
-- CI exports
+- CI outputs
 
 ---
 
-## 13. Addendum A – Record Mode Technical Spec
+## 14. Addendum A – Record Mode Technical Spec
 
-**Purpose**
-Rapid capture of user flows.
+Capture:
+- Navigation
+- Clicks
+- Inputs
+- Candidate selectors
 
-**Implementation**
-- Playwright event listeners
-- Capture:
-  - navigation
-  - clicks
-  - inputs
-  - candidate selectors
-- Save as raw recording
-- LLM refactors into TestCase
+Output:
+- Raw recording
+- Replayable
 
----
-
-## 14. Addendum B – GitHub Issues (Initial Backlog)
-
-### Epic: Core Application
-- Electron shell setup
-- IPC messaging layer
-- Persistent storage layout
-
-### Epic: Chat & LLM
-- Chat UI
-- Copilot integration
-- DSL validation
-
-### Epic: Playwright Runner
-- Browser selection
-- Tool policy enforcement
-- Artifact capture
-
-### Epic: Test Management
-- Test CRUD
-- Assertion builder
-- Versioning
-
-### Epic: Record Mode
-- Capture engine
-- Refactor pipeline
-
-### Epic: Reporting
-- Run history UI
-- Export system
+Refactor:
+- LLM → TestCase DSL
+- User approval required
 
 ---
 
-## 15. Clarification Rule (Mandatory)
+## 15. Addendum B – PR Governance Checklist
 
-If any ambiguity exists in intent, tools, navigation, or data:
+- UI controls wired
+- Acceptance criteria met
+- No secrets exposed
+- Tool policy enforced
+- Golden paths tested
 
-**The system must ask a clarifying question before proceeding.**
+---
+
+## 16. Clarification Rule
+
+If ambiguity exists, the system must stop and ask a clarifying question.

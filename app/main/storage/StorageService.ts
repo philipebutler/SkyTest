@@ -84,6 +84,31 @@ export class StorageService {
     return this.resolve("exports");
   }
 
+  /**
+   * Returns the absolute path to the storageState.json for a given auth profile.
+   * Returns null when profile is absent ("none"/empty) or the file does not exist.
+   * The profile name is sanitized to prevent path traversal (Issue #13).
+   */
+  getStorageStatePath(profile: string): string | null {
+    if (!profile || profile === "none") return null;
+    const safeName = profile.replace(/[^a-z0-9_-]/gi, "_");
+    const p = path.join(this.authDir, `${safeName}.json`);
+    return fs.existsSync(p) ? p : null;
+  }
+
+  /**
+   * Returns a list of auth profile names that have a saved storageState.json
+   * inside the auth directory (Issue #13).
+   */
+  listAuthProfiles(): string[] {
+    const dir = this.authDir;
+    if (!fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => f.replace(/\.json$/, ""));
+  }
+
   // ---------------------------------------------------------------------------
   // Settings
   // ---------------------------------------------------------------------------

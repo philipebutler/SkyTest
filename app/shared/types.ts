@@ -165,7 +165,9 @@ export type IpcChannel =
   | "saveTest"
   | "getSettings"
   | "saveSettings"
-  | "chat:send";
+  | "chat:send"
+  | "auth:updateSession"
+  | "auth:listProfiles";
 
 /**
  * Persisted user settings (Issue #2, Issue #3).

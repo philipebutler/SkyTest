@@ -1,5 +1,6 @@
 import { chromium, firefox, webkit } from "playwright";
-import type { Browser, BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, BrowserContextOptions, Page } from "playwright";
+import * as fs from "fs";
 import * as path from "path";
 import type { ActionStep, Artifact, BrowserType, DSLPlan, StepResult } from "../../shared/types";
 
@@ -21,20 +22,27 @@ export class PlaywrightExecutor {
   /**
    * Execute a DSL plan using the specified browser.
    *
-   * @param plan         - Validated DSLPlan to execute.
-   * @param browser      - Browser to launch (chromium | firefox | webkit).
-   * @param headed       - Whether to run the browser in headed (visible) mode.
-   * @param artifactsDir - Directory to write screenshots and other artifacts.
+   * @param plan              - Validated DSLPlan to execute.
+   * @param browser           - Browser to launch (chromium | firefox | webkit).
+   * @param headed            - Whether to run the browser in headed (visible) mode.
+   * @param artifactsDir      - Directory to write screenshots and other artifacts.
+   * @param storageStatePath  - Optional path to a storageState.json for session reuse (Issue #13).
    */
   async execute(
     plan: DSLPlan,
     browser: BrowserType,
     headed: boolean,
-    artifactsDir: string
+    artifactsDir: string,
+    storageStatePath?: string
   ): Promise<ExecutionResult> {
     const launcher = this.getLauncher(browser);
     const browserInstance: Browser = await launcher.launch({ headless: !headed });
-    const context: BrowserContext = await browserInstance.newContext();
+    // Reuse authenticated session when a valid storageState file is provided (Issue #13)
+    const contextOptions: BrowserContextOptions =
+      storageStatePath && fs.existsSync(storageStatePath)
+        ? { storageState: storageStatePath }
+        : {};
+    const context: BrowserContext = await browserInstance.newContext(contextOptions);
     const page: Page = await context.newPage();
 
     const stepResults: StepResult[] = [];

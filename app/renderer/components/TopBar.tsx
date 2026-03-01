@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import type { AppConfig } from "../App";
 import type { BrowserType, ToolPolicy } from "../../shared/types";
 
@@ -10,12 +10,22 @@ interface Props {
 
 const BROWSERS: BrowserType[] = ["chromium", "firefox", "webkit"];
 const TOOL_POLICIES: ToolPolicy[] = ["read-only", "safe-write", "full"];
-// Auth profiles are loaded from the auth/ directory at runtime.
-// For the skeleton, a static list with a "none" default is used.
-// TODO (#auth): Populate from auth/ storageState files per environment (SPEC §8)
-const AUTH_PROFILES = ["none"];
 
 export default function TopBar({ config, onConfigChange, onRun }: Props): React.ReactElement {
+  // Auth profiles are loaded from the auth/ directory (Issue #13).
+  // The list always includes "none" (no auth) as the default option.
+  const [authProfiles, setAuthProfiles] = useState<string[]>(["none"]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const profiles = (await window.skytest.invoke("auth:listProfiles")) as string[];
+        setAuthProfiles(["none", ...profiles]);
+      } catch {
+        // Keep the default ["none"] on error
+      }
+    })();
+  }, []);
   const update = <K extends keyof AppConfig>(key: K, value: AppConfig[K]) =>
     onConfigChange({ ...config, [key]: value });
 
@@ -75,7 +85,7 @@ export default function TopBar({ config, onConfigChange, onRun }: Props): React.
           value={config.authProfile}
           onChange={(e) => update("authProfile", e.target.value)}
         >
-          {AUTH_PROFILES.map((p) => (
+          {authProfiles.map((p) => (
             <option key={p} value={p}>
               {p}
             </option>

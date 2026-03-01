@@ -86,7 +86,7 @@ export class PlaywrightExecutor {
     };
 
     try {
-      await this.runAction(page, step, artifactsDir);
+      await this.runAction(page, step, stepIndex, artifactsDir, artifacts);
     } catch (err) {
       result.status = "failed";
       result.error = err instanceof Error ? err.message : String(err);
@@ -112,7 +112,7 @@ export class PlaywrightExecutor {
     return result;
   }
 
-  private async runAction(page: Page, step: ActionStep, artifactsDir: string): Promise<void> {
+  private async runAction(page: Page, step: ActionStep, stepIndex: number, artifactsDir: string, artifacts: Artifact[]): Promise<void> {
     const timeout = step.timeout ?? 30_000;
     switch (step.action) {
       case "navigate":
@@ -152,10 +152,17 @@ export class PlaywrightExecutor {
         }, step.selector ?? "");
         break;
       case "screenshot": {
-        // Named screenshot step – save to the run's artifacts directory
+        // Named screenshot step – save to the run's artifacts directory and register artifact
         const screenshotId = `artifact-screenshot-${Date.now()}`;
         const screenshotPath = path.join(artifactsDir, `${screenshotId}.png`);
         await page.screenshot({ path: screenshotPath, fullPage: true });
+        artifacts.push({
+          id: screenshotId,
+          type: "screenshot",
+          path: screenshotPath,
+          createdAt: new Date().toISOString(),
+          stepIndex,
+        });
         break;
       }
       case "assert":

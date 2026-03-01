@@ -247,3 +247,130 @@ describe("PlaywrightExecutor – stops on fatal failure (Issue #11)", () => {
     expect(result.stepResults.every((r) => r.status === "passed")).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #12 – Artifact Capture acceptance criteria
+// ---------------------------------------------------------------------------
+
+describe("PlaywrightExecutor – artifact capture on step failure (Issue #12)", () => {
+  it("captures a screenshot artifact when a step fails", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    mockPage.goto.mockRejectedValue(new Error("Navigation timed out"));
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "artifact capture on failure",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp");
+
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.artifacts[0].type).toBe("screenshot");
+  });
+
+  it("links the captured artifact to the failed step result via artifactIds", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    mockPage.click.mockRejectedValue(new Error("Element not found"));
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "artifact linkage test",
+      steps: [
+        { action: "navigate", value: "https://example.com" },
+        { action: "click", selector: "#missing" },
+      ],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp");
+
+    const failedStep = result.stepResults.find((r) => r.status === "failed");
+    expect(failedStep).toBeDefined();
+    expect(failedStep!.artifactIds).toHaveLength(1);
+    expect(result.artifacts[0].id).toBe(failedStep!.artifactIds[0]);
+  });
+
+  it("stores artifact metadata including path and stepIndex", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    mockPage.goto.mockRejectedValue(new Error("Timeout"));
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "artifact metadata test",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/artifacts");
+
+    const artifact = result.artifacts[0];
+    expect(artifact.stepIndex).toBe(0);
+    expect(artifact.path).toContain("/artifacts");
+    expect(artifact.path).toContain(".png");
+    expect(artifact.createdAt).toBeDefined();
+  });
+
+  it("does not add artifacts when all steps pass", async () => {
+    const executor = new PlaywrightExecutor();
+    setupExecutorWithMockPage(executor);
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "no artifact on success",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp");
+
+    expect(result.stepResults[0].status).toBe("passed");
+    expect(result.artifacts).toHaveLength(0);
+    expect(result.stepResults[0].artifactIds).toHaveLength(0);
+  });
+
+  it("still captures the error message when the failure screenshot also fails", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    mockPage.goto.mockRejectedValue(new Error("Navigation error"));
+    mockPage.screenshot.mockRejectedValue(new Error("Screenshot failed"));
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "screenshot failure resilience",
+      steps: [{ action: "navigate", value: "https://example.com" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp");
+
+    expect(result.stepResults[0].status).toBe("failed");
+    expect(result.stepResults[0].error).toBe("Navigation error");
+    // No artifact because screenshot itself failed
+    expect(result.artifacts).toHaveLength(0);
+  });
+});
+
+describe("PlaywrightExecutor – screenshot action registers artifact (Issue #12)", () => {
+  it("adds an artifact to the artifacts array when the screenshot action step is executed", async () => {
+    const executor = new PlaywrightExecutor();
+    setupExecutorWithMockPage(executor);
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "screenshot action artifact",
+      steps: [{ action: "screenshot" }],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp");
+
+    expect(result.stepResults[0].status).toBe("passed");
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.artifacts[0].type).toBe("screenshot");
+    expect(result.artifacts[0].path).toContain(".png");
+    expect(result.artifacts[0].stepIndex).toBe(0);
+  });
+});

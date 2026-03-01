@@ -138,6 +138,14 @@ export type ToolPolicy = "read-only" | "safe-write" | "full";
 
 export type BrowserType = "chromium" | "firefox" | "webkit";
 
+/** Raw recording captured by RecordEngine (Issue #21). */
+export interface RawRecording {
+  schemaVersion: string;
+  id: string;
+  steps: ActionStep[];
+  createdAt: string;
+}
+
 export interface RunConfig {
   command: string;
   environment: string;
@@ -180,7 +188,9 @@ export type IpcChannel =
   | "saveSettings"
   | "chat:send"
   | "auth:updateSession"
-  | "auth:listProfiles";
+  | "auth:listProfiles"
+  | "record:start"
+  | "record:stop";
 
 /**
  * Persisted user settings (Issue #2, Issue #3).

@@ -3,7 +3,7 @@ import { dialog } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { chromium } from "playwright";
-import type { BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
+import type { ActionStep, BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
 import { TestCaseRepository } from "../storage/TestCaseRepository";
 import { RunRepository } from "../storage/RunRepository";
@@ -12,10 +12,12 @@ import { CopilotAdapter } from "../llm/CopilotAdapter";
 import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
 import { validateDSL, validateDSLPolicy } from "../validation/dslValidator";
 import { PlaywrightExecutor } from "../runner/PlaywrightExecutor";
+import { RecordEngine } from "../record/RecordEngine";
 
 export function registerIpcHandlers(ipcMain: IpcMain): void {
   const orchestrator = new LLMOrchestrator(new CopilotAdapter());
   const executor = new PlaywrightExecutor();
+  const recordEngine = new RecordEngine();
   const runRepo = new RunRepository(StorageService.getInstance().runsDir);
 
   // Channel: chat:send (Issue #5 / SPEC §16, Issue #6 clarification enforcement)
@@ -349,4 +351,34 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
   ipcMain.handle("auth:listProfiles", async (): Promise<string[]> => {
     return StorageService.getInstance().listAuthProfiles();
   });
+
+  // Channel: record:start (Issue #21)
+  // Launches a headed browser, attaches DOM event listeners for navigation/clicks/inputs,
+  // and pushes record:event messages to the renderer for each captured ActionStep.
+  // Returns { ok: true } when the browser is ready.
+  ipcMain.handle(
+    "record:start",
+    async (event: IpcMainInvokeEvent, payload: { browser?: BrowserType }): Promise<{ ok: true }> => {
+      const sender = event.sender;
+      const browser = payload?.browser ?? "chromium";
+      await recordEngine.start((step) => {
+        if (!sender.isDestroyed()) {
+          sender.send("record:event", step);
+        }
+      }, browser);
+      return { ok: true };
+    }
+  );
+
+  // Channel: record:stop (Issue #21)
+  // Stops the in-progress recording, saves the raw recording file to the recordings directory,
+  // and returns the captured steps as ActionStep[].
+  ipcMain.handle(
+    "record:stop",
+    async (): Promise<{ steps: ActionStep[] }> => {
+      const recordingsDir = StorageService.getInstance().recordingsDir;
+      const steps = await recordEngine.stop(recordingsDir);
+      return { steps };
+    }
+  );
 }

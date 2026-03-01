@@ -20,7 +20,7 @@ const SCHEMA_VERSION = "1";
 /**
  * Ordered list of sub-directory names that must exist under the base path.
  */
-const REQUIRED_DIRS = ["tests", "runs", "auth", "artifacts", "exports"] as const;
+const REQUIRED_DIRS = ["tests", "runs", "auth", "artifacts", "exports", "recordings"] as const;
 
 type DirKey = (typeof REQUIRED_DIRS)[number];
 
@@ -82,6 +82,10 @@ export class StorageService {
 
   get exportsDir(): string {
     return this.resolve("exports");
+  }
+
+  get recordingsDir(): string {
+    return this.resolve("recordings");
   }
 
   /**

@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Chat from "./screens/Chat";
 import RunHistory from "./screens/RunHistory";
+import RecordScreen from "./screens/Record";
 import SettingsScreen from "./screens/Settings";
 import TestLibrary from "./screens/TestLibrary";
 import type { BrowserType, Settings, ToolPolicy } from "../shared/types";
@@ -100,19 +101,10 @@ export default function App(): React.ReactElement {
           )}
           {screen === "tests" && <TestLibrary config={config} />}
           {screen === "runs" && <RunHistory />}
-          {screen === "record" && <Placeholder title="Record Mode" />}
+          {screen === "record" && <RecordScreen />}
           {screen === "settings" && <SettingsScreen />}
         </main>
       </div>
-    </div>
-  );
-}
-
-function Placeholder({ title }: { title: string }): React.ReactElement {
-  return (
-    <div style={styles.placeholder}>
-      <h2 style={styles.placeholderTitle}>{title}</h2>
-      <p style={styles.placeholderHint}>Coming soon in a future milestone.</p>
     </div>
   );
 }
@@ -135,20 +127,5 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     overflow: "auto",
     padding: "1rem",
-  },
-  placeholder: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    opacity: 0.5,
-  },
-  placeholderTitle: {
-    fontSize: "1.5rem",
-    marginBottom: "0.5rem",
-  },
-  placeholderHint: {
-    fontSize: "0.875rem",
   },
 };

@@ -1,8 +1,61 @@
+export type ActionVerb =
+  | "navigate"
+  | "click"
+  | "fill"
+  | "select"
+  | "check"
+  | "uncheck"
+  | "hover"
+  | "wait"
+  | "waitForSelector"
+  | "waitForNavigation"
+  | "scroll"
+  | "screenshot"
+  | "assert";
+
 export interface ActionStep {
   action: string;
   selector?: string;
   value?: string;
   url?: string;
+  timeout?: number;
+  optional?: boolean;
+}
+
+/** Canonical interchange format between the LLM planner and the Playwright Executor (SPEC §6). */
+export interface DSLPlan {
+  version: "1";
+  /** Human-readable summary of the plan. */
+  intent: string;
+  steps: ActionStep[];
+}
+
+/** Context sent to the LLM on every request (SPEC §11.2). Credentials must never appear here. */
+export interface LLMRequest {
+  systemPrompt: string;
+  userMessage: string;
+  toolPolicy: ToolPolicy;
+  allowedVerbs: ActionVerb[];
+  environment: string;
+  baseUrl: string;
+  priorSteps?: ActionStep[];
+}
+
+/** Discriminated response returned by any LLMAdapter implementation (SPEC §11.4). */
+export interface LLMResponse {
+  type: "plan" | "clarification" | "error";
+  /** DSLPlan when type is "plan"; clarification/error text otherwise. */
+  content: DSLPlan | string;
+  /** Always populated for audit — must not contain secrets. */
+  rawText: string;
+  tokensUsed?: number;
+}
+
+/** Single token emitted during a streaming response (SPEC §16 chat:stream). */
+export interface LLMStreamToken {
+  streamId: string;
+  token: string;
+  done: boolean;
 }
 
 export interface Assertion {
@@ -92,7 +145,8 @@ export type IpcChannel =
   | "getRunHistory"
   | "saveTest"
   | "getSettings"
-  | "saveSettings";
+  | "saveSettings"
+  | "chat:send";
 
 /**
  * Persisted user settings (Issue #2, Issue #3).

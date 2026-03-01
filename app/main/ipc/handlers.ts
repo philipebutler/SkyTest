@@ -9,14 +9,25 @@ import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
 export function registerIpcHandlers(ipcMain: IpcMain): void {
   const orchestrator = new LLMOrchestrator(new CopilotAdapter());
 
-  // Channel: chat:send (Issue #5 / SPEC §16)
+  // Channel: chat:send (Issue #5 / SPEC §16, Issue #6 clarification enforcement)
   // Accepts a prompt + context from the renderer, starts an async LLM stream,
   // and pushes chat:stream tokens back to the renderer window.
   // Returns { streamId } immediately so the renderer can correlate stream events.
+  // If the LLM response is a clarification, the terminal token carries responseType="clarification"
+  // and no Playwright execution is triggered (Issue #6).
   ipcMain.handle("chat:send", async (event, payload: ChatSendPayload): Promise<{ streamId: string }> => {
     const streamId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     // Run asynchronously so the invoke call returns streamId without waiting for the full LLM response
-    void orchestrator.handleChatSend(streamId, payload, event.sender);
+    void orchestrator.handleChatSend(streamId, payload, event.sender).then((response) => {
+      // Issue #6: Never execute Playwright when the LLM is asking for clarification.
+      // Execution is only permitted when the response is a resolved DSL plan.
+      if (response.type === "plan") {
+        // TODO (#11): Wire Playwright executor here – only reached when type === "plan"
+        console.log(`[chat:send] streamId=${streamId} – plan received, ready for execution`);
+      } else {
+        console.log(`[chat:send] streamId=${streamId} – no execution: response type is "${response.type}"`);
+      }
+    });
     return { streamId };
   });
   // Channel: executeCommand

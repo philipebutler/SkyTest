@@ -14,7 +14,6 @@ export class CopilotAdapter implements LLMAdapter {
     const rawText =
       "CLARIFY: No LLM endpoint is configured. Please set up the Copilot API in Settings.";
     console.log("[CopilotAdapter] complete() called – stub response returned");
-    console.log(`[CopilotAdapter] userMessage: ${request.userMessage}`);
     return {
       type: "clarification",
       content: rawText.replace(/^CLARIFY:\s*/, ""),
@@ -28,7 +27,6 @@ export class CopilotAdapter implements LLMAdapter {
   ): Promise<LLMResponse> {
     // TODO (#5): Stream tokens from Copilot API endpoint
     console.log("[CopilotAdapter] stream() called – stub response returned");
-    console.log(`[CopilotAdapter] userMessage: ${request.userMessage}`);
     const response = await this.complete(request);
     // Emit the full content as a single "token" for the stub
     onToken(typeof response.content === "string" ? response.content : JSON.stringify(response.content));

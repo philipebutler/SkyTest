@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import Chat from "./screens/Chat";
+import SettingsScreen from "./screens/Settings";
 import type { BrowserType, ToolPolicy } from "../shared/types";
 
 export type Screen = "chat" | "tests" | "runs" | "record" | "settings";
@@ -60,7 +61,7 @@ export default function App(): React.ReactElement {
           {screen === "tests" && <Placeholder title="Test Library" />}
           {screen === "runs" && <Placeholder title="Run History" />}
           {screen === "record" && <Placeholder title="Record Mode" />}
-          {screen === "settings" && <Placeholder title="Settings" />}
+          {screen === "settings" && <SettingsScreen />}
         </main>
       </div>
     </div>

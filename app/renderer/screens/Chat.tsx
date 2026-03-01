@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { AppConfig } from "../App";
-import type { ActionStep, Run, TestCase } from "../../shared/types";
+import type { ActionStep, TestCase } from "../../shared/types";
 
 // Typed IPC bridge exposed by preload.ts
 declare global {
   interface Window {
     skytest: {
       invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
+      on: (channel: string, listener: (...args: unknown[]) => void) => () => void;
     };
   }
 }
@@ -16,6 +17,10 @@ interface Message {
   text: string;
   /** Raw command captured for Save as Test (user messages only) */
   command?: string;
+  /** True while a streaming response is being received */
+  streaming?: boolean;
+  /** Correlates a streaming message to its stream session */
+  streamId?: string;
 }
 
 interface Props {
@@ -54,29 +59,58 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
     setInput("");
     setRunning(true);
 
+    let unsubscribe: (() => void) | null = null;
+
     try {
-      const run = (await window.skytest.invoke("executeCommand", {
-        command,
+      // Issue #5: Send prompt to LLM Orchestrator via chat:send and stream tokens back
+      const { streamId } = (await window.skytest.invoke("chat:send", {
+        prompt: command,
+        toolPolicy: config.toolPolicy,
         environment: config.environment,
         browser: config.browser,
-        headed: config.headed,
-        toolPolicy: config.toolPolicy,
-        authProfile: config.authProfile,
-      })) as Run;
+      })) as { streamId: string };
 
+      // Accumulate streamed tokens in a temporary "streaming" message
+      let accumulated = "";
       setMessages((prev) => [
         ...prev,
-        {
-          role: "result",
-          text: `Run ${run.id} completed with status: ${run.status}`,
-        },
+        { role: "assistant", text: "", streaming: true, streamId },
       ]);
+
+      unsubscribe = window.skytest.on(
+        "chat:stream",
+        (data: unknown) => {
+          const { streamId: sid, token, done } = data as { streamId: string; token: string; done: boolean };
+          if (sid !== streamId) return;
+
+          if (done) {
+            if (unsubscribe) {
+              unsubscribe();
+              unsubscribe = null;
+            }
+            setRunning(false);
+            return;
+          }
+
+          accumulated += token;
+          setMessages((prev) =>
+            prev.map((m) =>
+              (m as { streamId?: string }).streamId === streamId
+                ? { ...m, text: accumulated }
+                : m
+            )
+          );
+        }
+      );
     } catch (err) {
+      if (unsubscribe) {
+        unsubscribe();
+        unsubscribe = null;
+      }
       setMessages((prev) => [
         ...prev,
         { role: "assistant", text: `Error: ${String(err)}` },
       ]);
-    } finally {
       setRunning(false);
     }
   }, [config, setMessages, setInput, setRunning]);

@@ -6,6 +6,7 @@ declare global {
   interface Window {
     skytest: {
       invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
+      on: (channel: string, listener: (...args: unknown[]) => void) => () => void;
     };
   }
 }

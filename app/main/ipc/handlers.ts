@@ -1,14 +1,16 @@
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import * as fs from "fs";
 import * as path from "path";
-import type { DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
+import type { BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
 import { CopilotAdapter } from "../llm/CopilotAdapter";
 import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
 import { validateDSL, validateDSLPolicy } from "../validation/dslValidator";
+import { PlaywrightExecutor } from "../runner/PlaywrightExecutor";
 
 export function registerIpcHandlers(ipcMain: IpcMain): void {
   const orchestrator = new LLMOrchestrator(new CopilotAdapter());
+  const executor = new PlaywrightExecutor();
 
   // Channel: chat:send (Issue #5 / SPEC §16, Issue #6 clarification enforcement)
   // Accepts a prompt + context from the renderer, starts an async LLM stream,
@@ -20,7 +22,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     const streamId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const sender = event.sender;
     // Run asynchronously so the invoke call returns streamId without waiting for the full LLM response
-    void orchestrator.handleChatSend(streamId, payload, sender).then((response) => {
+    void orchestrator.handleChatSend(streamId, payload, sender).then(async (response) => {
       // Issue #6: Never execute Playwright when the LLM is asking for clarification.
       // Execution is only permitted when the response is a resolved DSL plan.
       if (response.type === "plan") {
@@ -46,8 +48,19 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
           }
           return;
         }
-        // TODO (#11): Wire Playwright executor here – only reached when type === "plan" and DSL is valid
-        console.log(`[chat:send] streamId=${streamId} – plan valid, ready for execution`);
+        // Wire Playwright executor – only reached when type === "plan" and DSL is valid (Issue #9)
+        const storage = StorageService.getInstance();
+        const executionResult = await executor.execute(
+          dslPlan,
+          (payload.browser ?? "chromium") as BrowserType,
+          false,
+          storage.artifactsDir
+        );
+        const allPassed = executionResult.stepResults.every((r) => r.status !== "failed");
+        console.log(
+          `[chat:send] streamId=${streamId} – execution ${allPassed ? "passed" : "failed"} ` +
+          `(${executionResult.stepResults.length} steps, browser=${payload.browser})`
+        );
       } else {
         console.log(`[chat:send] streamId=${streamId} – no execution: response type is "${response.type}"`);
       }
@@ -70,8 +83,28 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       artifacts: [],
       startedAt: new Date().toISOString(),
     };
-    // TODO (#11): Wire Playwright executor to execute config.command
-    run.status = "passed";
+    // Execute the plan with the selected browser (Issue #9).
+    // An empty DSLPlan is used here when no steps are provided; full command parsing
+    // (turning config.command into DSL steps) is part of Issue #11.
+    try {
+      const dslPlan: DSLPlan = { version: "1", intent: config.command, steps: [] };
+      if (dslPlan.steps.length > 0) {
+        const executionResult = await executor.execute(
+          dslPlan,
+          config.browser,
+          config.headed,
+          StorageService.getInstance().artifactsDir
+        );
+        run.stepResults = executionResult.stepResults;
+        run.artifacts = executionResult.artifacts;
+        run.status = executionResult.stepResults.some((r) => r.status === "failed") ? "failed" : "passed";
+      } else {
+        run.status = "passed";
+      }
+    } catch (err) {
+      run.status = "failed";
+      console.error("[executeCommand] Execution error:", err);
+    }
     run.finishedAt = new Date().toISOString();
     const runsDir = StorageService.getInstance().runsDir;
     fs.writeFileSync(
@@ -98,8 +131,31 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       artifacts: [],
       startedAt: new Date().toISOString(),
     };
-    // TODO (#11): Load TestCase from tests/ and wire Playwright executor
-    run.status = "passed";
+    // Load TestCase from tests/ directory and execute with the stored browser (Issue #9)
+    try {
+      const testsDir = StorageService.getInstance().testsDir;
+      const testFilePath = path.join(testsDir, `${payload.testId}.json`);
+      if (!fs.existsSync(testFilePath)) {
+        throw new Error(`Test file not found: ${payload.testId}`);
+      }
+      const testCase = JSON.parse(fs.readFileSync(testFilePath, "utf-8")) as TestCase;
+      // Use browser from TestCase metadata if available, otherwise default to chromium
+      const browserToUse: BrowserType = testCase.browser ?? "chromium";
+      run.browser = browserToUse;
+      const dslPlan: DSLPlan = { version: "1", intent: payload.testId, steps: testCase.steps };
+      const executionResult = await executor.execute(
+        dslPlan,
+        browserToUse,
+        run.headed,
+        StorageService.getInstance().artifactsDir
+      );
+      run.stepResults = executionResult.stepResults;
+      run.artifacts = executionResult.artifacts;
+      run.status = executionResult.stepResults.some((r) => r.status === "failed") ? "failed" : "passed";
+    } catch (err) {
+      run.status = "failed";
+      console.error("[executeTest] Execution error:", err);
+    }
     run.finishedAt = new Date().toISOString();
     const runsDir = StorageService.getInstance().runsDir;
     fs.writeFileSync(
@@ -121,6 +177,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       preconditions: [],
       steps: payload.steps,
       assertions: [],
+      browser: payload.browser,
       createdAt: now,
       updatedAt: now,
     };

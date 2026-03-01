@@ -40,6 +40,7 @@
     "webpack-dev-server": "^5.2.3"
   },
   "dependencies": {
+    "playwright": "^1.58.2",
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },
@@ -49,7 +50,11 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "roots": ["<rootDir>/app"],
-    "testMatch": ["**/*.test.ts"]
+    "roots": [
+      "<rootDir>/app"
+    ],
+    "testMatch": [
+      "**/*.test.ts"
+    ]
   }
 }

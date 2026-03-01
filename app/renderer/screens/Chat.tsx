@@ -212,6 +212,7 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
       const testCase = (await window.skytest.invoke("saveTest", {
         name: testName,
         steps,
+        browser: config.browser,
       })) as TestCase;
       setMessages((prev) => [
         ...prev,

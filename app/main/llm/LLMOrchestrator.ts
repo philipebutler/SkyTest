@@ -1,5 +1,6 @@
 import type { WebContents } from "electron";
 import type { LLMAdapter } from "./LLMAdapter";
+import { redactSecrets } from "./credentialSanitizer";
 import type {
   ActionVerb,
   ChatHistoryEntry,
@@ -32,20 +33,22 @@ Rules:
 - Do not emit code, markdown, or explanation
 - Only use verbs from this list: ${allowedVerbs.join(", ")}
 - If intent is ambiguous, output CLARIFY: followed by your question
-- The base URL for this session is: ${baseUrl}
+- The base URL for this session is: ${redactSecrets(baseUrl)}
 - Do not guess at selectors; use descriptive selectors the user would recognize`;
 }
 
 /**
  * Builds the user message, prepending conversation history when resuming from a clarification (Issue #6).
  * The LLM receives the full prior exchange so it can resolve ambiguity without guessing.
+ * All content is passed through redactSecrets() before being included (Issue #14).
  */
 function buildUserMessage(prompt: string, chatHistory?: ChatHistoryEntry[]): string {
-  if (!chatHistory || chatHistory.length === 0) return prompt;
+  const safePrompt = redactSecrets(prompt);
+  if (!chatHistory || chatHistory.length === 0) return safePrompt;
   const historyText = chatHistory
-    .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${h.content}`)
+    .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${redactSecrets(h.content)}`)
     .join("\n");
-  return `Prior conversation:\n${historyText}\n\nUser: ${prompt}`;
+  return `Prior conversation:\n${historyText}\n\nUser: ${safePrompt}`;
 }
 
 /**
@@ -151,9 +154,9 @@ export class LLMOrchestrator {
       };
     }
 
-    // Log raw text for audit (must not contain secrets – adapter is responsible for this)
+    // Log raw text for audit — redacted to ensure no secrets are written to logs (Issue #14)
     console.log(`[LLMOrchestrator] streamId=${streamId} type=${response.type}`);
-    console.log(`[LLMOrchestrator] rawText: ${response.rawText}`);
+    console.log(`[LLMOrchestrator] rawText: ${redactSecrets(response.rawText)}`);
 
     // Send terminal token to signal end of stream, carrying the response classification
     const doneToken: LLMStreamToken = { streamId, token: "", done: true, responseType: response.type };

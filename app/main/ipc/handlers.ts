@@ -129,7 +129,10 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
           config.browser,
           config.headed,
           storage.artifactsDir,
-          storageStatePath
+          storageStatePath,
+          undefined,
+          config.retryCount,
+          config.retryMode
         );
         run.stepResults = executionResult.stepResults;
         run.artifacts = executionResult.artifacts;
@@ -178,13 +181,19 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       const storage = StorageService.getInstance();
       // Reuse auth session for the test's environment when a saved state exists (Issue #13)
       const storageStatePath = storage.getStorageStatePath(run.environment) ?? undefined;
+      // Use retry settings from the TestCase if set, otherwise fall back to global settings (Issue #23)
+      const settings = storage.getSettings();
+      const retryCount = testCase.retryCount ?? settings.retryCount;
+      const retryMode = testCase.retryMode ?? settings.retryMode;
       const executionResult = await executor.execute(
         dslPlan,
         browserToUse,
         run.headed,
         storage.artifactsDir,
         storageStatePath,
-        testCase.assertions
+        testCase.assertions,
+        retryCount,
+        retryMode
       );
       run.stepResults = executionResult.stepResults;
       run.assertionResults = executionResult.assertionResults;

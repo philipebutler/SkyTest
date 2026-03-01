@@ -187,6 +187,8 @@ export class StorageService {
           lastHeaded: parsed.lastHeaded ?? defaults.lastHeaded,
           lastAuthProfile: parsed.lastAuthProfile ?? defaults.lastAuthProfile,
           lastToolPolicy: parsed.lastToolPolicy ?? defaults.lastToolPolicy,
+          retryCount: parsed.retryCount ?? defaults.retryCount,
+          retryMode: parsed.retryMode ?? defaults.retryMode,
           createdAt: parsed.createdAt ?? now,
           updatedAt: parsed.updatedAt ?? now,
         };
@@ -211,6 +213,8 @@ export class StorageService {
       lastHeaded: false,
       lastAuthProfile: "none",
       lastToolPolicy: "read-only",
+      retryCount: 0,
+      retryMode: "step",
       createdAt: now,
       updatedAt: now,
     };

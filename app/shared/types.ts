@@ -90,8 +90,21 @@ export interface TestCase {
   assertions: Assertion[];
   /** Browser used when this test was last saved/run (Issue #9). */
   browser?: BrowserType;
+  /** Number of times to retry a failed step or test (Issue #23). */
+  retryCount?: number;
+  /** Whether to retry per step or per test (Issue #23). */
+  retryMode?: "step" | "test";
   createdAt: string;
   updatedAt: string;
+}
+
+/** A single attempt recorded during a retried step (Issue #23). */
+export interface RetryAttempt {
+  /** 1-based attempt number (1 = original, 2 = first retry, etc.). */
+  attempt: number;
+  status: "passed" | "failed";
+  error?: string;
+  durationMs: number;
 }
 
 export interface StepResult {
@@ -101,6 +114,8 @@ export interface StepResult {
   error?: string;
   artifactIds: string[];
   durationMs: number;
+  /** Populated when one or more retries occurred for this step (Issue #23). */
+  retryAttempts?: RetryAttempt[];
 }
 
 export interface AssertionResult {
@@ -132,6 +147,8 @@ export interface Run {
   artifacts: Artifact[];
   startedAt: string;
   finishedAt?: string;
+  /** Number of test-level attempts when retryMode is "test" (Issue #23). */
+  testAttempts?: number;
 }
 
 export type ToolPolicy = "read-only" | "safe-write" | "full";
@@ -163,6 +180,10 @@ export interface RunConfig {
   headed: boolean;
   toolPolicy: ToolPolicy;
   authProfile?: string;
+  /** Number of times to retry a failed step or test (Issue #23). */
+  retryCount?: number;
+  /** Whether to retry per step or per test (Issue #23). */
+  retryMode?: "step" | "test";
 }
 
 export interface SaveTestPayload {
@@ -232,6 +253,10 @@ export interface Settings {
   lastAuthProfile: string;
   /** Last-used tool policy (Issue #3). */
   lastToolPolicy: ToolPolicy;
+  /** Default retry count for test/step execution (Issue #23). */
+  retryCount: number;
+  /** Default retry mode: retry per step or per test (Issue #23). */
+  retryMode: "step" | "test";
   createdAt: string;
   updatedAt: string;
 }

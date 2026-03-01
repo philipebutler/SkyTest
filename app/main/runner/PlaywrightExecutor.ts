@@ -2,7 +2,7 @@ import { chromium, firefox, webkit } from "playwright";
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from "playwright";
 import * as fs from "fs";
 import * as path from "path";
-import type { ActionStep, Artifact, Assertion, AssertionResult, BrowserType, DSLPlan, StepResult } from "../../shared/types";
+import type { ActionStep, Artifact, Assertion, AssertionResult, BrowserType, DSLPlan, RetryAttempt, StepResult } from "../../shared/types";
 import { AssertionEngine } from "./AssertionEngine";
 
 export interface ExecutionResult {
@@ -12,13 +12,14 @@ export interface ExecutionResult {
 }
 
 /**
- * Playwright Executor (Issue #9 / SPEC §6).
+ * Playwright Executor (Issue #9 / SPEC §6, Issue #23 – Retry & Flake Handling).
  *
  * Responsible for:
  * - Launching the browser selected by the user (chromium, firefox, webkit)
  * - Executing a validated DSL plan step-by-step
  * - Capturing artifacts (screenshots) on step failure
  * - Recording the browser choice in run metadata
+ * - Retrying failed steps or the entire test run (Issue #23)
  */
 export class PlaywrightExecutor {
   /**
@@ -30,6 +31,9 @@ export class PlaywrightExecutor {
    * @param artifactsDir      - Directory to write screenshots and other artifacts.
    * @param storageStatePath  - Optional path to a storageState.json for session reuse (Issue #13).
    * @param assertions        - Optional assertions to evaluate after all steps complete (Issue #17).
+   * @param retryCount        - Number of additional attempts on failure (Issue #23).
+   * @param retryMode         - "step" retries each failed step individually; "test" retries the
+   *                            whole plan from the beginning (Issue #23).
    */
   async execute(
     plan: DSLPlan,
@@ -37,7 +41,9 @@ export class PlaywrightExecutor {
     headed: boolean,
     artifactsDir: string,
     storageStatePath?: string,
-    assertions?: Assertion[]
+    assertions?: Assertion[],
+    retryCount?: number,
+    retryMode?: "step" | "test"
   ): Promise<ExecutionResult> {
     const launcher = this.getLauncher(browser);
     const browserInstance: Browser = await launcher.launch({ headless: !headed });
@@ -49,18 +55,28 @@ export class PlaywrightExecutor {
     const context: BrowserContext = await browserInstance.newContext(contextOptions);
     const page: Page = await context.newPage();
 
-    const stepResults: StepResult[] = [];
-    const artifacts: Artifact[] = [];
+    const maxRetries = retryCount ?? 0;
+    const mode = retryMode ?? "step";
 
-    for (let i = 0; i < plan.steps.length; i++) {
-      const step = plan.steps[i];
-      const start = Date.now();
-      const result = await this.executeStep(page, step, i, artifactsDir, artifacts);
-      result.durationMs = Date.now() - start;
-      stepResults.push(result);
-      if (result.status === "failed") {
-        break;
-      }
+    let stepResults: StepResult[];
+    let artifacts: Artifact[] = [];
+
+    if (mode === "test") {
+      ({ stepResults, artifacts } = await this.executeWithTestRetry(
+        page,
+        plan,
+        artifactsDir,
+        artifacts,
+        maxRetries
+      ));
+    } else {
+      ({ stepResults, artifacts } = await this.executeWithStepRetry(
+        page,
+        plan,
+        artifactsDir,
+        artifacts,
+        maxRetries
+      ));
     }
 
     // Run assertions after all steps complete (Issue #17)
@@ -88,12 +104,133 @@ export class PlaywrightExecutor {
     }
   }
 
+  /**
+   * Execute all steps with per-step retry (Issue #23).
+   * Each failed step is retried up to maxRetries times before giving up.
+   */
+  private async executeWithStepRetry(
+    page: Page,
+    plan: DSLPlan,
+    artifactsDir: string,
+    artifacts: Artifact[],
+    maxRetries: number
+  ): Promise<{ stepResults: StepResult[]; artifacts: Artifact[] }> {
+    const stepResults: StepResult[] = [];
+
+    for (let i = 0; i < plan.steps.length; i++) {
+      const step = plan.steps[i];
+      const result = await this.executeStepWithRetry(page, step, i, artifactsDir, artifacts, maxRetries);
+      stepResults.push(result);
+      if (result.status === "failed") {
+        break;
+      }
+    }
+
+    return { stepResults, artifacts };
+  }
+
+  /**
+   * Execute all steps with per-test retry (Issue #23).
+   * If the test fails, all steps are re-run from the beginning up to maxRetries times.
+   * Each test-level attempt is logged distinctly.
+   */
+  private async executeWithTestRetry(
+    page: Page,
+    plan: DSLPlan,
+    artifactsDir: string,
+    artifacts: Artifact[],
+    maxRetries: number
+  ): Promise<{ stepResults: StepResult[]; artifacts: Artifact[] }> {
+    let stepResults: StepResult[] = [];
+    let testAttempt = 1;
+    const totalAttempts = maxRetries + 1;
+
+    while (testAttempt <= totalAttempts) {
+      if (testAttempt > 1) {
+        console.log(
+          `[PlaywrightExecutor] test-level retry attempt ${testAttempt}/${totalAttempts} (previous attempt failed)`
+        );
+      }
+      stepResults = [];
+
+      for (let i = 0; i < plan.steps.length; i++) {
+        const step = plan.steps[i];
+        const start = Date.now();
+        const result = await this.executeStep(page, step, i, artifactsDir, artifacts, testAttempt);
+        result.durationMs = Date.now() - start;
+        stepResults.push(result);
+        if (result.status === "failed") {
+          break;
+        }
+      }
+
+      const testPassed = stepResults.every((r) => r.status !== "failed");
+      if (testPassed || testAttempt >= totalAttempts) {
+        break;
+      }
+      testAttempt++;
+    }
+
+    return { stepResults, artifacts };
+  }
+
+  /**
+   * Execute a single step with per-step retry (Issue #23).
+   * Records each attempt in retryAttempts when more than one attempt is made.
+   */
+  private async executeStepWithRetry(
+    page: Page,
+    step: ActionStep,
+    stepIndex: number,
+    artifactsDir: string,
+    artifacts: Artifact[],
+    maxRetries: number
+  ): Promise<StepResult> {
+    const totalAttempts = maxRetries + 1;
+    const retryAttempts: RetryAttempt[] = [];
+
+    // lastResult is always assigned in the loop since totalAttempts >= 1
+    let lastResult!: StepResult;
+
+    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+      if (attempt > 1) {
+        console.log(
+          `[PlaywrightExecutor] step ${stepIndex} ("${step.action}") – retry attempt ${attempt}/${totalAttempts}`
+        );
+      }
+      const start = Date.now();
+      const result = await this.executeStep(page, step, stepIndex, artifactsDir, artifacts);
+      result.durationMs = Date.now() - start;
+      lastResult = result;
+
+      if (maxRetries > 0) {
+        retryAttempts.push({
+          attempt,
+          status: result.status === "failed" ? "failed" : "passed",
+          error: result.error,
+          durationMs: result.durationMs,
+        });
+      }
+
+      if (result.status !== "failed") {
+        break;
+      }
+    }
+
+    if (maxRetries > 0) {
+      lastResult.retryAttempts = retryAttempts;
+    }
+
+    return lastResult;
+  }
+
   private async executeStep(
     page: Page,
     step: ActionStep,
     stepIndex: number,
     artifactsDir: string,
-    artifacts: Artifact[]
+    artifacts: Artifact[],
+    testAttempt?: number
   ): Promise<StepResult> {
     const result: StepResult = {
       stepIndex,
@@ -109,7 +246,8 @@ export class PlaywrightExecutor {
       result.status = "failed";
       result.error = err instanceof Error ? err.message : String(err);
       // Capture a screenshot on failure for diagnostics (SPEC §10.1)
-      const screenshotId = `artifact-${Date.now()}-${stepIndex}`;
+      const attemptTag = testAttempt !== undefined ? `-attempt${testAttempt}` : "";
+      const screenshotId = `artifact-${Date.now()}-${stepIndex}${attemptTag}`;
       const screenshotPath = path.join(artifactsDir, `${screenshotId}.png`);
       try {
         await page.screenshot({ path: screenshotPath, fullPage: true });

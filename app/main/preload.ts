@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { IpcChannel } from "../shared/types";
 
 /** Channels that the renderer is allowed to listen on (pushed from main). */
-const ALLOWED_LISTEN_CHANNELS = ["chat:stream", "chat:executionError"] as const;
+const ALLOWED_LISTEN_CHANNELS = ["chat:stream", "chat:executionError", "record:event"] as const;
 type ListenChannel = (typeof ALLOWED_LISTEN_CHANNELS)[number];
 
 contextBridge.exposeInMainWorld("skytest", {

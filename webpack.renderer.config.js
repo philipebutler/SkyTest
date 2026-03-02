@@ -1,9 +1,14 @@
 const path = require("path");
+const webpack = require("webpack");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 
 module.exports = {
   entry: "./app/renderer/index.tsx",
-  target: "electron-renderer",
+  // Use "web" instead of "electron-renderer" because nodeIntegration is disabled.
+  // "electron-renderer" emits code that references `global`, `process`, etc.
+  // which don't exist in a renderer with contextIsolation: true / nodeIntegration: false.
+  target: "web",
+  devtool: "source-map",
   module: {
     rules: [
       {

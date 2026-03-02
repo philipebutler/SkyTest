@@ -224,6 +224,7 @@ export type IpcChannel =
   | "chat:send"
   | "auth:updateSession"
   | "auth:listProfiles"
+  | "llm:testConnection"
   | "record:start"
   | "record:stop"
   | "record:refactor";

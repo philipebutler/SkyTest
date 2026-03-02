@@ -306,6 +306,53 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     }
   );
 
+  // Channel: llm:testConnection
+  // Sends a minimal request to the configured LLM endpoint to verify connectivity.
+  // Returns { ok, message, model?, latencyMs? }.
+  ipcMain.handle(
+    "llm:testConnection",
+    async (): Promise<{ ok: boolean; message: string; model?: string; latencyMs?: number }> => {
+      const settings = StorageService.getInstance().getSettings();
+      const endpoint = settings.llmEndpoint?.trim();
+      const apiKey = settings.llmApiKey?.trim();
+      const model = settings.llmModel?.trim() || "gpt-4o";
+
+      if (!endpoint || !apiKey) {
+        return { ok: false, message: "API Base URL and API Key must be configured before testing." };
+      }
+
+      const start = Date.now();
+      try {
+        const response = await fetch(`${endpoint}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: "Reply with exactly: OK" }],
+            max_tokens: 5,
+          }),
+        });
+        const latencyMs = Date.now() - start;
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => "(no body)");
+          return { ok: false, message: `HTTP ${response.status}: ${errText.slice(0, 200)}`, latencyMs };
+        }
+
+        const data = (await response.json()) as { model?: string; choices?: Array<{ message?: { content?: string } }> };
+        const reply = data.choices?.[0]?.message?.content ?? "(no reply)";
+        const usedModel = data.model ?? model;
+        return { ok: true, message: `Connected! Model: ${usedModel} — Reply: "${reply.trim()}"`, model: usedModel, latencyMs };
+      } catch (err) {
+        const latencyMs = Date.now() - start;
+        return { ok: false, message: `Connection failed: ${err instanceof Error ? err.message : String(err)}`, latencyMs };
+      }
+    }
+  );
+
   // Channel: auth:updateSession (Issue #13)
   // Launches a headed Chromium browser so the user can log in manually.
   // Saves storageState.json to the auth directory for the given environment.

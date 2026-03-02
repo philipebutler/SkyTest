@@ -32,6 +32,7 @@ Rules:
 - Output only valid JSON conforming to DSLPlan v1, or a clarifying question prefixed with CLARIFY:
 - Do not emit code, markdown, or explanation
 - Only use verbs from this list: ${allowedVerbs.join(", ")}
+- DSL does not support a "press" action. For intents like "press enter" or "submit", represent submission with supported actions (for example clicking a submit/search button) when permitted by tool policy.
 - If intent is ambiguous, output CLARIFY: followed by your question
 - The base URL for this session is: ${redactSecrets(baseUrl)}
 - Do not guess at selectors; use descriptive selectors the user would recognize`;

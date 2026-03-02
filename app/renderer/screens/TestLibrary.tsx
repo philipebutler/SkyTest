@@ -35,6 +35,13 @@ export default function TestLibrary({ config }: Props): React.ReactElement {
   // Selected test for the detail/editor panel
   const [selectedTest, setSelectedTest] = useState<TestCase | null>(null);
 
+  // Raw JSON editor state
+  const [jsonDraft, setJsonDraft] = useState("");
+  const [jsonDirty, setJsonDirty] = useState(false);
+  const [jsonSaving, setJsonSaving] = useState(false);
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [jsonSuccess, setJsonSuccess] = useState<string | null>(null);
+
   // Per-test run state
   const [runStates, setRunStates] = useState<Record<string, TestRunState>>({});
 
@@ -118,6 +125,58 @@ export default function TestLibrary({ config }: Props): React.ReactElement {
 
   const runState = (testId: string): TestRunState =>
     runStates[testId] ?? { status: "idle" };
+
+  useEffect(() => {
+    if (!selectedTest) {
+      setJsonDraft("");
+      setJsonDirty(false);
+      setJsonError(null);
+      setJsonSuccess(null);
+      return;
+    }
+    setJsonDraft(JSON.stringify(selectedTest, null, 2));
+    setJsonDirty(false);
+    setJsonError(null);
+    setJsonSuccess(null);
+  }, [selectedTest]);
+
+  const handleSaveRawJson = useCallback(async () => {
+    if (!selectedTest || !jsonDirty) return;
+    setJsonSaving(true);
+    setJsonError(null);
+    setJsonSuccess(null);
+    try {
+      JSON.parse(jsonDraft);
+    } catch (err) {
+      setJsonError(`Invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
+      setJsonSaving(false);
+      return;
+    }
+
+    try {
+      const updated = (await window.skytest.invoke("updateTest", {
+        testId: selectedTest.id,
+        rawJson: jsonDraft,
+      })) as TestCase;
+
+      setSelectedTest(updated);
+      setTests((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      setJsonSuccess("Saved.");
+      setJsonDirty(false);
+    } catch (err) {
+      setJsonError(`Save failed: ${String(err)}`);
+    } finally {
+      setJsonSaving(false);
+    }
+  }, [selectedTest, jsonDraft, jsonDirty]);
+
+  const handleResetRawJson = useCallback(() => {
+    if (!selectedTest) return;
+    setJsonDraft(JSON.stringify(selectedTest, null, 2));
+    setJsonDirty(false);
+    setJsonError(null);
+    setJsonSuccess(null);
+  }, [selectedTest]);
 
   if (loading) {
     return (
@@ -426,9 +485,44 @@ export default function TestLibrary({ config }: Props): React.ReactElement {
 
             <div style={styles.detailSection}>
               <strong style={styles.detailLabel}>Raw JSON</strong>
-              <pre style={styles.jsonViewer}>
-                {JSON.stringify(selectedTest, null, 2)}
-              </pre>
+              <textarea
+                style={styles.jsonEditor}
+                value={jsonDraft}
+                onChange={(e) => {
+                  setJsonDraft(e.target.value);
+                  setJsonDirty(true);
+                  setJsonError(null);
+                  setJsonSuccess(null);
+                }}
+                spellCheck={false}
+                aria-label="Edit test raw JSON"
+              />
+              <div style={styles.jsonActionsRow}>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.saveJsonButton,
+                    ...((!jsonDirty || jsonSaving) ? styles.buttonDisabled : {}),
+                  }}
+                  onClick={() => void handleSaveRawJson()}
+                  disabled={!jsonDirty || jsonSaving}
+                >
+                  {jsonSaving ? "Saving…" : "Save JSON"}
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.resetJsonButton,
+                    ...((!jsonDirty || jsonSaving) ? styles.buttonDisabled : {}),
+                  }}
+                  onClick={handleResetRawJson}
+                  disabled={!jsonDirty || jsonSaving}
+                >
+                  Reset
+                </button>
+                {jsonError && <span style={styles.jsonError}>{jsonError}</span>}
+                {!jsonError && jsonSuccess && <span style={styles.jsonSuccess}>{jsonSuccess}</span>}
+              </div>
             </div>
 
             <div style={styles.detailFooter}>
@@ -803,7 +897,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.05rem 0.3rem",
     color: "#9cdcfe",
   },
-  jsonViewer: {
+  jsonEditor: {
     backgroundColor: "#1a1a1a",
     border: "1px solid #3c3c3c",
     borderRadius: "4px",
@@ -812,11 +906,44 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.72rem",
     lineHeight: "1.4",
     margin: 0,
-    overflowX: "auto",
     padding: "0.5rem",
-    whiteSpace: "pre",
     maxHeight: "250px",
-    overflowY: "auto",
+    minHeight: "250px",
+    resize: "vertical",
+    width: "100%",
+  },
+  jsonActionsRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    flexWrap: "wrap",
+  },
+  saveJsonButton: {
+    backgroundColor: "#0e639c",
+    border: "none",
+    borderRadius: "4px",
+    color: "#fff",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    fontWeight: "bold",
+    padding: "0.25rem 0.6rem",
+  },
+  resetJsonButton: {
+    backgroundColor: "transparent",
+    border: "1px solid #555",
+    borderRadius: "4px",
+    color: "#aaa",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+    padding: "0.25rem 0.6rem",
+  },
+  jsonError: {
+    color: "#f4a4a4",
+    fontSize: "0.72rem",
+  },
+  jsonSuccess: {
+    color: "#a8d5a2",
+    fontSize: "0.72rem",
   },
   detailFooter: {
     display: "flex",

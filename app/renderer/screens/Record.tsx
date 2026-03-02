@@ -149,8 +149,8 @@ export default function RecordScreen(): React.ReactElement {
   // Save raw recording (skips AI refactoring) – Issue #21 path
   const handleSaveRaw = useCallback(async () => {
     if (steps.length === 0) return;
-    const testName = window.prompt("Test name:", "Recorded Test");
-    if (!testName) return;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const testName = `Recorded Test ${timestamp}`;
 
     setSaving(true);
     try {
@@ -173,8 +173,8 @@ export default function RecordScreen(): React.ReactElement {
     const defaultName = refactored.intent !== "Recorded test" && refactored.intent !== "Empty recording"
       ? refactored.intent
       : "Recorded Test";
-    const testName = window.prompt("Test name:", defaultName);
-    if (!testName) return;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const testName = `${defaultName} ${timestamp}`;
 
     setSaving(true);
     try {

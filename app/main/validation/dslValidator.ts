@@ -15,6 +15,8 @@
 
 import type { ActionStep, ActionVerb, DSLPlan, DSLValidationResult, ToolPolicy } from "../../shared/types";
 
+type AnyRecord = Record<string, unknown>;
+
 /** Full set of recognised ActionVerb values (SPEC §6.1). */
 const VALID_VERBS = new Set<ActionVerb>([
   "navigate",
@@ -46,6 +48,82 @@ const POLICY_ALLOWED_VERBS: Record<ToolPolicy, Set<ActionVerb>> = {
     "wait", "waitForSelector", "waitForNavigation", "scroll", "screenshot", "assert",
   ]),
 };
+
+/**
+ * Normalizes common LLM JSON variants into the canonical DSLPlan shape.
+ *
+ * Supported step aliases:
+ * - verb -> action
+ * - url  -> value (for navigate)
+ * - selector -> value (for navigate, legacy/non-canonical output)
+ * - text -> value
+ * - name -> ignored (non-canonical screenshot metadata)
+ */
+export function normalizeDSLPlan(plan: unknown, fallbackIntent = "Generated plan"): unknown {
+  if (typeof plan !== "object" || plan === null) return plan;
+
+  const input = plan as AnyRecord;
+  const rawSteps = Array.isArray(input.steps) ? (input.steps as unknown[]) : [];
+
+  const steps: ActionStep[] = rawSteps.map((raw) => {
+    if (typeof raw !== "object" || raw === null) {
+      return { action: "" };
+    }
+
+    const step = raw as AnyRecord;
+    const action =
+      (typeof step.action === "string" ? step.action : undefined) ??
+      (typeof step.verb === "string" ? step.verb : undefined) ??
+      "";
+
+    const selector = typeof step.selector === "string" ? step.selector : undefined;
+    const timeout = typeof step.timeout === "number" ? step.timeout : undefined;
+    const optional = typeof step.optional === "boolean" ? step.optional : undefined;
+
+    const targetCandidate = typeof step.target === "string" ? step.target : undefined;
+
+    const valueCandidate =
+      (typeof step.value === "string" ? step.value : undefined) ??
+      (typeof step.text === "string" ? step.text : undefined) ??
+      (typeof step.url === "string" ? step.url : undefined) ??
+      (action === "navigate" || action === "wait" || action === "fill" || action === "select"
+        ? targetCandidate
+        : undefined);
+
+    const selectorCandidate =
+      (typeof step.selector === "string" ? step.selector : undefined) ??
+      (action === "click" ||
+      action === "check" ||
+      action === "uncheck" ||
+      action === "hover" ||
+      action === "waitForSelector" ||
+      action === "scroll" ||
+      action === "assert"
+        ? targetCandidate
+        : undefined);
+
+    const normalizedValue = valueCandidate ?? (action === "navigate" ? selector : undefined);
+
+    return {
+      action,
+      selector: selectorCandidate,
+      value: normalizedValue,
+      timeout,
+      optional,
+    };
+  });
+
+  const intent =
+    (typeof input.intent === "string" && input.intent.trim() !== ""
+      ? input.intent
+      : fallbackIntent).trim();
+
+  return {
+    version: "1",
+    intent,
+    steps,
+  } satisfies DSLPlan;
+}
 
 /**
  * Returns true if the string looks like a valid absolute URL.

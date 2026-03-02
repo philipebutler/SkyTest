@@ -3,7 +3,7 @@ import { dialog } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { chromium } from "playwright";
-import type { ActionStep, BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase } from "../../shared/types";
+import type { ActionStep, Assertion, BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase, ToolPolicy } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
 import { TestCaseRepository } from "../storage/TestCaseRepository";
 import { RunRepository } from "../storage/RunRepository";
@@ -11,10 +11,175 @@ import { RunExporter } from "../storage/RunExporter";
 import { CopilotAdapter } from "../llm/CopilotAdapter";
 import { buildChatCompletionsUrl } from "../llm/endpoint";
 import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
-import { validateDSL, validateDSLPolicy } from "../validation/dslValidator";
+import { normalizeDSLPlan, validateDSL, validateDSLPolicy } from "../validation/dslValidator";
 import { PlaywrightExecutor } from "../runner/PlaywrightExecutor";
 import { RecordEngine } from "../record/RecordEngine";
 import { RecordingRefactorer, type RefactoredRecording } from "../record/RecordingRefactorer";
+
+const LEGACY_CHAT_ACTION = "chat";
+
+function extractJsonFromText(rawText: string): unknown {
+  const trimmed = rawText.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : trimmed;
+  return JSON.parse(candidate);
+}
+
+function sanitizeStep(raw: unknown): ActionStep | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const source = raw as Record<string, unknown>;
+  const action = typeof source.action === "string" ? source.action : "";
+  if (!action) return null;
+  return {
+    action,
+    selector: typeof source.selector === "string" ? source.selector : undefined,
+    value: typeof source.value === "string" ? source.value : undefined,
+    url: typeof source.url === "string" ? source.url : undefined,
+    timeout: typeof source.timeout === "number" ? source.timeout : undefined,
+    optional: typeof source.optional === "boolean" ? source.optional : undefined,
+  };
+}
+
+function sanitizeTestCaseUpdate(existing: TestCase, raw: unknown): TestCase {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("Updated test JSON must be an object.");
+  }
+
+  const source = raw as Record<string, unknown>;
+  const now = new Date().toISOString();
+
+  const rawSteps = Array.isArray(source.steps) ? source.steps : existing.steps;
+  const steps = rawSteps
+    .map((s) => sanitizeStep(s))
+    .filter((s): s is ActionStep => s !== null);
+
+  if (steps.length === 0) {
+    throw new Error("Updated test must contain at least one valid step.");
+  }
+
+  const rawPreconditions = Array.isArray(source.preconditions)
+    ? source.preconditions
+    : existing.preconditions;
+  const preconditions = rawPreconditions
+    .map((s) => sanitizeStep(s))
+    .filter((s): s is ActionStep => s !== null);
+
+  const rawAssertions = Array.isArray(source.assertions) ? source.assertions : existing.assertions;
+  const assertions: Assertion[] = [];
+  for (const rawAssertion of rawAssertions) {
+    if (typeof rawAssertion !== "object" || rawAssertion === null) continue;
+    const record = rawAssertion as Record<string, unknown>;
+    const type = record.type;
+    if (
+      type !== "textVisible" &&
+      type !== "elementVisible" &&
+      type !== "urlContains" &&
+      type !== "countEquals"
+    ) {
+      continue;
+    }
+    assertions.push({
+      type,
+      selector: typeof record.selector === "string" ? record.selector : undefined,
+      value: typeof record.value === "string" ? record.value : undefined,
+      count: typeof record.count === "number" ? record.count : undefined,
+    });
+  }
+
+  const nextName =
+    typeof source.name === "string" && source.name.trim() !== ""
+      ? source.name.trim()
+      : existing.name;
+  const nextTags = Array.isArray(source.tags)
+    ? source.tags.filter((t): t is string => typeof t === "string")
+    : existing.tags;
+  const nextBrowser =
+    source.browser === "chromium" || source.browser === "firefox" || source.browser === "webkit"
+      ? source.browser
+      : existing.browser;
+  const nextRetryCount =
+    typeof source.retryCount === "number" && source.retryCount >= 0
+      ? Math.floor(source.retryCount)
+      : existing.retryCount;
+  const nextRetryMode =
+    source.retryMode === "step" || source.retryMode === "test"
+      ? source.retryMode
+      : existing.retryMode;
+
+  return {
+    schemaVersion:
+      typeof source.schemaVersion === "string" && source.schemaVersion.trim() !== ""
+        ? source.schemaVersion
+        : existing.schemaVersion,
+    id: existing.id,
+    name: nextName,
+    tags: nextTags,
+    preconditions,
+    steps,
+    assertions,
+    browser: nextBrowser,
+    retryCount: nextRetryCount,
+    retryMode: nextRetryMode,
+    createdAt: existing.createdAt,
+    updatedAt: now,
+  };
+}
+
+async function expandLegacyChatSteps(steps: ActionStep[], adapter: CopilotAdapter): Promise<ActionStep[]> {
+  const expanded: ActionStep[] = [];
+
+  for (const step of steps) {
+    if (step.action !== LEGACY_CHAT_ACTION) {
+      expanded.push(step);
+      continue;
+    }
+
+    const prompt = step.value?.trim();
+    if (!prompt) {
+      throw new Error("Legacy chat step is missing a command value.");
+    }
+
+    const llmResponse = await adapter.complete({
+      systemPrompt:
+        "You are a test automation planner. Output only JSON that conforms to DSLPlan v1 with fields version, intent, and steps. Do not include markdown or explanations.",
+      userMessage: prompt,
+      toolPolicy: "full",
+      allowedVerbs: [
+        "navigate",
+        "click",
+        "fill",
+        "select",
+        "check",
+        "uncheck",
+        "hover",
+        "wait",
+        "waitForSelector",
+        "waitForNavigation",
+        "scroll",
+        "screenshot",
+        "assert",
+      ],
+      environment: "default",
+      baseUrl: "",
+    });
+
+    if (llmResponse.type !== "plan") {
+      throw new Error("Legacy chat step could not be converted to executable steps.");
+    }
+
+    const parsed = extractJsonFromText(llmResponse.rawText);
+    const normalizedPlan = normalizeDSLPlan(parsed, prompt);
+    const schemaResult = validateDSL(normalizedPlan);
+    if (!schemaResult.valid) {
+      const details = schemaResult.errors.map((e) => e.message).join("; ");
+      throw new Error(`Legacy chat step conversion produced invalid DSL: ${details}`);
+    }
+
+    expanded.push(...(normalizedPlan as DSLPlan).steps);
+  }
+
+  return expanded;
+}
 
 export function registerIpcHandlers(ipcMain: IpcMain): void {
   const orchestrator = new LLMOrchestrator(new CopilotAdapter());
@@ -36,9 +201,10 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       // Issue #6: Never execute Playwright when the LLM is asking for clarification.
       // Execution is only permitted when the response is a resolved DSL plan.
       if (response.type === "plan") {
+        const normalizedPlan = normalizeDSLPlan(response.content as unknown, payload.prompt);
         // Validate DSL schema before execution (Issue #7)
         // Pass content as unknown so validateDSL performs full runtime checks first.
-        const schemaResult = validateDSL(response.content as unknown);
+        const schemaResult = validateDSL(normalizedPlan);
         if (!schemaResult.valid) {
           console.warn(`[chat:send] streamId=${streamId} – DSL schema validation failed:`, schemaResult.errors);
           // Notify the renderer so the user sees an actionable error message (Issue #8)
@@ -48,7 +214,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
           return;
         }
         // Safe cast: validateDSL returned valid=true, confirming the shape is DSLPlan
-        const dslPlan = response.content as DSLPlan;
+        const dslPlan = normalizedPlan as DSLPlan;
         const policyResult = validateDSLPolicy(dslPlan, payload.toolPolicy);
         if (!policyResult.valid) {
           console.warn(`[chat:send] streamId=${streamId} – DSL policy validation failed:`, policyResult.errors);
@@ -150,6 +316,73 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     return run;
   });
 
+  // Channel: executeDSLPlan
+  // Executes a pre-defined DSL plan directly (without LLM round-trip).
+  ipcMain.handle(
+    "executeDSLPlan",
+    async (
+      _event,
+      payload: {
+        plan: unknown;
+        intent?: string;
+        environment: string;
+        browser: BrowserType;
+        headed: boolean;
+        toolPolicy: ToolPolicy;
+      }
+    ): Promise<
+      | { ok: true; run: Run }
+      | { ok: false; reason: "schema" | "policy"; errors: Array<{ stepIndex: number; message: string }> }
+    > => {
+      const normalizedPlan = normalizeDSLPlan(payload.plan, payload.intent ?? "Execute DSL plan");
+
+      const schemaResult = validateDSL(normalizedPlan);
+      if (!schemaResult.valid) {
+        return { ok: false, reason: "schema", errors: schemaResult.errors };
+      }
+
+      const dslPlan = normalizedPlan as DSLPlan;
+      const policyResult = validateDSLPolicy(dslPlan, payload.toolPolicy);
+      if (!policyResult.valid) {
+        return { ok: false, reason: "policy", errors: policyResult.errors };
+      }
+
+      const storage = StorageService.getInstance();
+      const run: Run = {
+        schemaVersion: "1",
+        id: `run-${Date.now()}-direct`,
+        environment: payload.environment ?? "default",
+        browser: payload.browser ?? "chromium",
+        headed: payload.headed ?? false,
+        toolPolicy: payload.toolPolicy,
+        status: "running",
+        stepResults: [],
+        artifacts: [],
+        startedAt: new Date().toISOString(),
+      };
+
+      try {
+        const executionResult = await executor.execute(
+          dslPlan,
+          payload.browser,
+          payload.headed,
+          storage.artifactsDir
+        );
+        run.stepResults = executionResult.stepResults;
+        run.artifacts = executionResult.artifacts;
+        const allPassed = executionResult.stepResults.every((r) => r.status !== "failed");
+        run.status = allPassed ? "passed" : "failed";
+      } catch (err) {
+        run.status = "failed";
+        console.error("[executeDSLPlan] Execution error:", err);
+      }
+
+      run.finishedAt = new Date().toISOString();
+      runRepo.save(run);
+      return { ok: true, run };
+    }
+  );
+
   // Channel: executeTest
   // Accepts a testId, loads the TestCase from disk, and executes it.
   // Full Playwright execution will be wired in subsequent issues.
@@ -175,10 +408,16 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       if (!testCase) {
         throw new Error(`Test file not found: ${payload.testId}`);
       }
+
+      let executableSteps = testCase.steps;
+      if (testCase.steps.some((step) => step.action === LEGACY_CHAT_ACTION)) {
+        executableSteps = await expandLegacyChatSteps(testCase.steps, new CopilotAdapter());
+      }
+
       // Use browser from TestCase metadata if available, otherwise default to chromium
       const browserToUse: BrowserType = testCase.browser ?? "chromium";
       run.browser = browserToUse;
-      const dslPlan: DSLPlan = { version: "1", intent: payload.testId, steps: testCase.steps };
+      const dslPlan: DSLPlan = { version: "1", intent: payload.testId, steps: executableSteps };
       const storage = StorageService.getInstance();
       // Reuse auth session for the test's environment when a saved state exists (Issue #13)
       const storageStatePath = storage.getStorageStatePath(run.environment) ?? undefined;
@@ -204,6 +443,17 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       run.status = stepsFailed || assertionsFailed ? "failed" : "passed";
     } catch (err) {
       run.status = "failed";
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      run.stepResults = [
+        {
+          stepIndex: 0,
+          action: "executeTest",
+          status: "failed",
+          error: errorMessage,
+          artifactIds: [],
+          durationMs: 0,
+        },
+      ];
       console.error("[executeTest] Execution error:", err);
     }
     run.finishedAt = new Date().toISOString();
@@ -221,16 +471,47 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
       name: payload.name,
       tags: [],
       preconditions: [],
-      steps: payload.steps,
+      steps: payload.steps
+        .map((step) => sanitizeStep(step))
+        .filter((step): step is ActionStep => step !== null),
       assertions: payload.assertions ?? [],
       browser: payload.browser,
       createdAt: now,
       updatedAt: now,
     };
+
+    if (testCase.steps.length === 0) {
+      throw new Error("Cannot save a test without at least one valid step.");
+    }
+
     const testRepo = new TestCaseRepository(StorageService.getInstance().testsDir);
     testRepo.save(testCase);
     return testCase;
   });
+
+  // Channel: updateTest
+  // Replaces a TestCase by ID using raw JSON edited from the Test Library.
+  ipcMain.handle(
+    "updateTest",
+    async (_event, payload: { testId: string; rawJson: string }): Promise<TestCase> => {
+      const testRepo = new TestCaseRepository(StorageService.getInstance().testsDir);
+      const existing = testRepo.load(payload.testId);
+      if (!existing) {
+        throw new Error(`Test not found: ${payload.testId}`);
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(payload.rawJson);
+      } catch (err) {
+        throw new Error(`Invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      const updated = sanitizeTestCaseUpdate(existing, parsed);
+      testRepo.save(updated);
+      return updated;
+    }
+  );
 
   // Channel: listTests
   // Returns all persisted TestCase records from the tests/ directory (Issue #15).

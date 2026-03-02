@@ -37,6 +37,55 @@ interface Props {
   registerRun: (fn: () => void) => void;
 }
 
+function extractJsonFromAssistantMessage(text: string): unknown | null {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : trimmed;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function extractStepsFromPlanLikeJson(value: unknown): ActionStep[] {
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.steps)) return [];
+
+  const result: ActionStep[] = [];
+  for (const rawStep of record.steps) {
+    if (typeof rawStep !== "object" || rawStep === null) continue;
+    const step = rawStep as Record<string, unknown>;
+    const action =
+      typeof step.action === "string"
+        ? step.action
+        : typeof step.verb === "string"
+        ? step.verb
+        : "";
+    if (!action) continue;
+
+    const valueFromAliases =
+      typeof step.value === "string"
+        ? step.value
+        : typeof step.text === "string"
+        ? step.text
+        : typeof step.url === "string"
+        ? step.url
+        : undefined;
+
+    result.push({
+      action,
+      selector: typeof step.selector === "string" ? step.selector : undefined,
+      value: valueFromAliases,
+      timeout: typeof step.timeout === "number" ? step.timeout : undefined,
+      optional: typeof step.optional === "boolean" ? step.optional : undefined,
+    });
+  }
+
+  return result;
+}
+
 export default function Chat({ config, runTrigger, registerRun }: Props): React.ReactElement {
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", text: "Hi! Enter a command and press Send to execute it via Playwright." },
@@ -125,12 +174,96 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
       return;
     }
 
-    const command = inputRef.current.trim();
-    if (!command) return;
+    const typedCommand = inputRef.current.trim();
+    if (!typedCommand) {
+      const latestAssistantPlan = [...messages]
+        .reverse()
+        .filter((m) => m.role === "assistant" && !m.streaming)
+        .map((m) => extractJsonFromAssistantMessage(m.text))
+        .find((parsed) => {
+          if (!parsed || typeof parsed !== "object") return false;
+          const record = parsed as Record<string, unknown>;
+          return Array.isArray(record.steps) && record.steps.length > 0;
+        });
+
+      if (latestAssistantPlan) {
+        setRunning(true);
+        try {
+          const result = (await window.skytest.invoke("executeDSLPlan", {
+            plan: latestAssistantPlan,
+            intent: "Run latest chat-defined plan",
+            environment: config.environment,
+            browser: config.browser,
+            headed: config.headed,
+            toolPolicy: config.toolPolicy,
+          })) as
+            | { ok: true; run: { id: string; status: string; stepResults: Array<unknown> } }
+            | {
+                ok: false;
+                reason: "schema" | "policy";
+                errors: Array<{ stepIndex: number; message: string }>;
+              };
+
+          if (!result.ok) {
+            const label = result.reason === "policy" ? "Tool policy violation" : "DSL schema error";
+            const details = result.errors.map((e) => `  • ${e.message}`).join("\n");
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "result",
+                text:
+                  `⛔ Execution blocked – ${label}\n\n` +
+                  `The latest plan could not be executed:\n${details}`,
+                isExecutionError: true,
+              },
+            ]);
+          } else {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "result",
+                text: `✅ Run ${result.run.status} (${result.run.stepResults.length} step(s)) [${result.run.id}]`,
+              },
+            ]);
+          }
+        } catch (err) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              text: `Error running latest plan: ${String(err)}`,
+              isExecutionError: true,
+            },
+          ]);
+        } finally {
+          setRunning(false);
+        }
+        return;
+      }
+    }
+
+    const fallbackCommand =
+      lastCommandRef.current ||
+      [...messages].reverse().find((m) => m.role === "user" && m.command)?.command ||
+      "";
+    const command = typedCommand || fallbackCommand;
+
+    if (!command) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: "No command to run yet. Enter a command in Chat and click Run (or Send).",
+        },
+      ]);
+      return;
+    }
 
     lastCommandRef.current = command;
     setMessages((prev) => [...prev, { role: "user", text: command, command }]);
-    setInput("");
+    if (typedCommand) {
+      setInput("");
+    }
     setRunning(true);
 
     let unsubscribe: (() => void) | null = null;
@@ -224,7 +357,7 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
       ]);
       setRunning(false);
     }
-  }, [config, chatHistory, hasBridge]);
+  }, [config, chatHistory, hasBridge, messages]);
 
   // Register this screen's run handler so the TopBar Run button can trigger it
   useEffect(() => {
@@ -242,18 +375,36 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
 
   // SPEC §5.2: "Save as Test button" — saves the chat session commands as a TestCase
   const handleSaveAsTest = async () => {
-    const testName = window.prompt("Test name:", "Untitled Test");
-    if (!testName) return;
+    const canonicalSteps = messages
+      .filter((m) => m.role === "assistant" && !m.streaming)
+      .map((m) => extractJsonFromAssistantMessage(m.text))
+      .flatMap((parsed) => extractStepsFromPlanLikeJson(parsed));
 
-    const steps: ActionStep[] = messages
-      .filter((m) => m.role === "user" && m.command)
-      .map((m) => ({ action: "chat", value: m.command }));
+    if (canonicalSteps.length === 0) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: "Save failed: no executable plan found in the chat yet. Run a command first, then save.",
+        },
+      ]);
+      return;
+    }
+
+    const lastUserCommand = [...messages]
+      .reverse()
+      .find((m) => m.role === "user" && m.command)?.command;
+    const shortCommand = lastUserCommand
+      ? lastUserCommand.replace(/\s+/g, " ").trim().slice(0, 40)
+      : "Untitled Test";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const testName = `${shortCommand || "Untitled Test"} ${timestamp}`;
 
     setSaving(true);
     try {
       const testCase = (await window.skytest.invoke("saveTest", {
         name: testName,
-        steps,
+        steps: canonicalSteps,
         browser: config.browser,
       })) as TestCase;
       setMessages((prev) => [

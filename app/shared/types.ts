@@ -204,6 +204,7 @@ export type IpcRequest =
   | { type: "ExecuteTest"; payload: { testId: string } }
   | { type: "GetRunHistory"; payload: Record<string, never> }
   | { type: "SaveTest"; payload: SaveTestPayload }
+  | { type: "UpdateTest"; payload: { testId: string; rawJson: string } }
   | { type: "ListTests"; payload: Record<string, never> }
   | { type: "DeleteTest"; payload: { testId: string } }
   | { type: "ExportRun"; payload: { runId: string } }
@@ -213,9 +214,11 @@ export type IpcRequest =
 
 export type IpcChannel =
   | "executeCommand"
+  | "executeDSLPlan"
   | "executeTest"
   | "getRunHistory"
   | "saveTest"
+  | "updateTest"
   | "listTests"
   | "deleteTest"
   | "exportRun"

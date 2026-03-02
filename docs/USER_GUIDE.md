@@ -137,6 +137,16 @@ The Test Library stores all saved test cases as local JSON files.
 2. Click **Delete** in the detail panel.
 3. Confirm the deletion in the confirmation prompt that appears.
 
+### Step-by-step: Edit raw JSON
+
+1. Open a test in the detail panel.
+2. In **Raw JSON**, edit the JSON directly.
+3. Click **Save JSON** to persist changes.
+4. If JSON parsing or schema checks fail, fix the inline error and save again.
+5. Click **Reset** to discard unsaved edits and restore the last saved version.
+
+> Legacy compatibility: older tests that contain `action: "chat"` steps are converted to executable DSL steps when run.
+
 ---
 
 ## Run History

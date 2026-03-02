@@ -253,6 +253,7 @@ All renderer ↔ main communication uses the `window.skytest` bridge.
 | `executeTest` | `{ testId: string }` | `Run` | Run a saved TestCase by ID |
 | `getRunHistory` | `{}` | `Run[]` | List all Run records |
 | `saveTest` | `SaveTestPayload` | `TestCase` | Save a new TestCase |
+| `updateTest` | `{ testId: string; rawJson: string }` | `TestCase` | Update an existing TestCase from raw JSON |
 | `listTests` | `{}` | `TestCase[]` | List all TestCase records |
 | `deleteTest` | `{ testId: string }` | `void` | Delete a TestCase |
 | `exportRun` | `{ runId: string }` | `{ markdown: string; json: string }` | Export a run |
@@ -318,6 +319,10 @@ Launches the browser, executes a `DSLPlan` step-by-step and returns an `Executio
 
 - **Browser selection:** `chromium` (default), `firefox` or `webkit`.
 - **Headed mode:** controlled by the `headed` parameter.
+
+### Legacy `action: "chat"` step migration
+
+For backward compatibility, `executeTest` detects legacy saved steps using `action: "chat"` and converts each chat command into canonical DSL steps through the configured LLM adapter before Playwright execution.
 - **Storage state:** if a valid `storageState.json` path is provided it is applied to the browser context before the first page is opened.
 - **Step execution:** each `ActionStep` is dispatched via a `switch` on `step.action`.
 - **Failure handling:** a full-page screenshot is captured on every step failure.

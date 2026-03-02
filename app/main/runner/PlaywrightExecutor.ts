@@ -22,6 +22,96 @@ export interface ExecutionResult {
  * - Retrying failed steps or the entire test run (Issue #23)
  */
 export class PlaywrightExecutor {
+  private static escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  private static escapeCssString(value: string): string {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  }
+
+  private async trySemanticFill(page: Page, selector: string, value: string, timeout: number): Promise<boolean> {
+    const label = selector.trim();
+    if (!label) return false;
+
+    const safeLabel = PlaywrightExecutor.escapeRegExp(label);
+    const safeCss = PlaywrightExecutor.escapeCssString(label);
+    const labelRegex = new RegExp(safeLabel, "i");
+
+    const attempts: Array<() => Promise<void>> = [
+      async () => {
+        await page.getByLabel(label, { exact: false }).first().fill(value, { timeout });
+      },
+      async () => {
+        await page.getByPlaceholder(label, { exact: false }).first().fill(value, { timeout });
+      },
+      async () => {
+        await page.getByRole("textbox", { name: labelRegex }).first().fill(value, { timeout });
+      },
+      async () => {
+        await page.getByRole("combobox", { name: labelRegex }).first().fill(value, { timeout });
+      },
+      async () => {
+        await page
+          .locator(`input[name="${safeCss}"], textarea[name="${safeCss}"], input[aria-label="${safeCss}"], textarea[aria-label="${safeCss}"]`)
+          .first()
+          .fill(value, { timeout });
+      },
+    ];
+
+    if (/search\s*(input|box|field)?/i.test(label)) {
+      attempts.push(async () => {
+        await page.locator('textarea[name="q"], input[name="q"], input[type="search"]').first().fill(value, { timeout });
+      });
+    }
+
+    for (const attempt of attempts) {
+      try {
+        await attempt();
+        return true;
+      } catch {
+        // Continue trying fallback selectors.
+      }
+    }
+
+    return false;
+  }
+
+  private async trySemanticClick(page: Page, selector: string, timeout: number): Promise<boolean> {
+    const label = selector.trim();
+    if (!label) return false;
+
+    const safeLabel = PlaywrightExecutor.escapeRegExp(label);
+    const labelRegex = new RegExp(safeLabel, "i");
+    const safeCss = PlaywrightExecutor.escapeCssString(label);
+
+    const attempts: Array<() => Promise<void>> = [
+      async () => {
+        await page.getByRole("button", { name: labelRegex }).first().click({ timeout });
+      },
+      async () => {
+        await page.getByRole("link", { name: labelRegex }).first().click({ timeout });
+      },
+      async () => {
+        await page.getByText(label, { exact: false }).first().click({ timeout });
+      },
+      async () => {
+        await page.locator(`[aria-label="${safeCss}"], [title="${safeCss}"], [data-testid="${safeCss}"]`).first().click({ timeout });
+      },
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        await attempt();
+        return true;
+      } catch {
+        // Continue trying fallback selectors.
+      }
+    }
+
+    return false;
+  }
+
   /**
    * Execute a DSL plan using the specified browser.
    *
@@ -286,10 +376,24 @@ export class PlaywrightExecutor {
         await page.goto(step.value ?? "", { timeout });
         break;
       case "click":
-        await page.click(step.selector ?? "", { timeout });
+        try {
+          await page.click(step.selector ?? "", { timeout });
+        } catch (err) {
+          const recovered = await this.trySemanticClick(page, step.selector ?? "", timeout);
+          if (!recovered) {
+            throw err;
+          }
+        }
         break;
       case "fill":
-        await page.fill(step.selector ?? "", step.value ?? "", { timeout });
+        try {
+          await page.fill(step.selector ?? "", step.value ?? "", { timeout });
+        } catch (err) {
+          const recovered = await this.trySemanticFill(page, step.selector ?? "", step.value ?? "", timeout);
+          if (!recovered) {
+            throw err;
+          }
+        }
         break;
       case "select":
         await page.selectOption(step.selector ?? "", step.value ?? "", { timeout });

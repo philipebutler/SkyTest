@@ -33,6 +33,11 @@ export default function SettingsScreen(): React.ReactElement {
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
+  // LLM connection test state
+  const [llmTestStatus, setLlmTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [llmTestResult, setLlmTestResult] = useState<string | null>(null);
+  const [llmTestLatency, setLlmTestLatency] = useState<number | null>(null);
+
   // Auth session update state (Issue #13)
   const [authEnv, setAuthEnv] = useState<string>("");
   const [authStatus, setAuthStatus] = useState<"idle" | "launching" | "saved" | "error">("idle");
@@ -311,6 +316,53 @@ export default function SettingsScreen(): React.ReactElement {
           />
         </div>
       </div>
+
+      <div style={{ ...styles.field, marginTop: "0.75rem" }}>
+          <div style={styles.inputRow}>
+            <button
+              style={{
+                ...styles.saveButton,
+                backgroundColor: llmTestStatus === "testing" ? "#555" : "#2e7d32",
+                ...(llmTestStatus === "testing" ? styles.buttonDisabled : {}),
+              }}
+              onClick={async () => {
+                setLlmTestStatus("testing");
+                setLlmTestResult(null);
+                setLlmTestLatency(null);
+                // Save current draft first so the handler reads the latest values
+                try {
+                  await window.skytest.invoke("saveSettings", draft);
+                } catch { /* ignore save errors during test */ }
+                try {
+                  const result = (await window.skytest.invoke("llm:testConnection")) as {
+                    ok: boolean;
+                    message: string;
+                    latencyMs?: number;
+                  };
+                  setLlmTestStatus(result.ok ? "ok" : "error");
+                  setLlmTestResult(result.message);
+                  setLlmTestLatency(result.latencyMs ?? null);
+                } catch (err) {
+                  setLlmTestStatus("error");
+                  setLlmTestResult(`Test failed: ${String(err)}`);
+                }
+              }}
+              disabled={llmTestStatus === "testing"}
+              type="button"
+            >
+              {llmTestStatus === "testing" ? "Testing…" : "🔌 Test Connection"}
+            </button>
+            {llmTestLatency != null && (
+              <span style={{ fontSize: "0.75rem", color: "#888" }}>{llmTestLatency}ms</span>
+            )}
+          </div>
+          {llmTestStatus === "ok" && llmTestResult && (
+            <p style={{ ...styles.savedText, marginTop: "0.4rem" }}>✅ {llmTestResult}</p>
+          )}
+          {llmTestStatus === "error" && llmTestResult && (
+            <p style={{ ...styles.errorText, marginTop: "0.4rem" }}>❌ {llmTestResult}</p>
+          )}
+        </div>
 
       {/* Retry Settings (Issue #23) */}
       <h3 style={styles.sectionHeading}>Retry Settings</h3>

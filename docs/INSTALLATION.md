@@ -219,6 +219,39 @@ Run `npx playwright install` to download the browser binaries. In CI add `--with
 npx playwright install --with-deps
 ```
 
+### Electron failed to install correctly (Windows)
+
+If `npm run dev` fails with:
+
+> `Electron failed to install correctly, please delete node_modules/electron and try installing again`
+
+reinstall Electron from PowerShell:
+
+```powershell
+Remove-Item -Recurse -Force .\node_modules\electron
+npm install electron --save-dev
+```
+
+If your company network uses TLS interception / custom root certificates and install fails with `self-signed certificate in certificate chain`, set npm's CA file and retry:
+
+```powershell
+npm config set cafile "C:\path\to\corporate-root-ca.pem"
+npm install electron --save-dev
+```
+
+As a temporary fallback for non-Electron tasks, you can install packages without running postinstall scripts:
+
+```powershell
+npm install --ignore-scripts
+```
+
+Then run normal setup when certificates are fixed:
+
+```powershell
+npm install
+npx playwright install
+```
+
 ### Chat returns "LLM adapter error"
 
 Verify your **API Base URL**, **API Key** and **Model** in Settings. Check that your API key has quota remaining and that the base URL ends with `/v1` (for OpenAI).

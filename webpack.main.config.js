@@ -22,6 +22,10 @@ module.exports = {
     filename: "[name].js",
     path: path.resolve(__dirname, "dist/main"),
   },
+  externals: {
+    playwright: "commonjs playwright",
+    "playwright-core": "commonjs playwright-core",
+  },
   node: {
     __dirname: false,
     __filename: false,

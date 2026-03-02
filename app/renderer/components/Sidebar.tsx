@@ -38,6 +38,8 @@ export default function Sidebar({ active, onNavigate }: Props): React.ReactEleme
 const styles: Record<string, React.CSSProperties> = {
   sidebar: {
     width: "140px",
+    minWidth: "140px",
+    flexShrink: 0,
     backgroundColor: "#252526",
     borderRight: "1px solid #3c3c3c",
     display: "flex",

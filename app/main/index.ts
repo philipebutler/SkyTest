@@ -4,6 +4,7 @@ import { registerIpcHandlers } from "./ipc/handlers";
 import { StorageService } from "./storage/StorageService";
 
 const isDev = process.env.NODE_ENV === "development";
+const shouldOpenDevTools = process.env.SKYTEST_OPEN_DEVTOOLS === "1";
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -21,7 +22,9 @@ function createWindow(): BrowserWindow {
 
   if (isDev) {
     win.loadURL("http://localhost:3000");
-    win.webContents.openDevTools();
+    if (shouldOpenDevTools) {
+      win.webContents.openDevTools();
+    }
   } else {
     win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
   }

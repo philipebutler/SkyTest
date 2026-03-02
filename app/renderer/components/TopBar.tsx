@@ -6,12 +6,18 @@ interface Props {
   config: AppConfig;
   onConfigChange: (cfg: AppConfig) => void;
   onRun: () => void;
+  onOpenSettings: () => void;
 }
 
 const BROWSERS: BrowserType[] = ["chromium", "firefox", "webkit"];
 const TOOL_POLICIES: ToolPolicy[] = ["read-only", "safe-write", "full"];
 
-export default function TopBar({ config, onConfigChange, onRun }: Props): React.ReactElement {
+export default function TopBar({
+  config,
+  onConfigChange,
+  onRun,
+  onOpenSettings,
+}: Props): React.ReactElement {
   // Auth profiles are loaded from the auth/ directory (Issue #13).
   // The list always includes "none" (no auth) as the default option.
   const [authProfiles, setAuthProfiles] = useState<string[]>(["none"]);
@@ -112,6 +118,15 @@ export default function TopBar({ config, onConfigChange, onRun }: Props): React.
         ▶ Run
       </button>
 
+      <button
+        style={styles.iconButton}
+        onClick={onOpenSettings}
+        title="Open Settings"
+        aria-label="Open Settings"
+      >
+        ⚙️
+      </button>
+
       <span style={styles.policyBadge} title="Active tool policy">
         🛡 {config.toolPolicy}
       </span>
@@ -169,6 +184,16 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.3rem 0.9rem",
     fontSize: "0.8rem",
     fontWeight: "bold",
+  },
+  iconButton: {
+    backgroundColor: "#2a2a2a",
+    border: "1px solid #555",
+    borderRadius: "4px",
+    color: "#ffffff",
+    cursor: "pointer",
+    padding: "0.25rem 0.55rem",
+    fontSize: "0.9rem",
+    lineHeight: 1.2,
   },
   policyBadge: {
     marginLeft: "auto",

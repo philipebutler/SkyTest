@@ -52,6 +52,11 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
   const [awaitingClarification, setAwaitingClarification] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatHistoryEntry[]>([]);
 
+  const hasBridge =
+    typeof window !== "undefined" &&
+    typeof window.skytest?.invoke === "function" &&
+    typeof window.skytest?.on === "function";
+
   // inputRef lets handleRun always read the latest input without being in its deps
   const inputRef = useRef(input);
   inputRef.current = input;
@@ -62,6 +67,23 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
   // Issue #8: Listen for execution errors (schema/policy violations) pushed from the main process.
   // These surface as visible error messages in the transcript so the user knows why execution was blocked.
   useEffect(() => {
+    if (!hasBridge) {
+      setMessages((prev) => {
+        if (prev.some((m) => m.role === "assistant" && m.text.includes("IPC bridge unavailable"))) {
+          return prev;
+        }
+        return [
+          ...prev,
+          {
+            role: "assistant",
+            text: "⚠️ IPC bridge unavailable. Renderer loaded, but preload communication is not ready.",
+            isExecutionError: true,
+          },
+        ];
+      });
+      return () => undefined;
+    }
+
     const unsub = window.skytest.on("chat:executionError", (data: unknown) => {
       const { reason, errors } = data as {
         reason: "schema" | "policy";
@@ -80,7 +102,7 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
       ]);
     });
     return unsub;
-  }, []);
+  }, [hasBridge]);
 
   // Auto-scroll transcript to bottom on every new message
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -91,6 +113,18 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
 
   // Memoized run handler; config is captured so changes to settings take effect immediately
   const handleRun = useCallback(async () => {
+    if (!hasBridge) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: "IPC bridge unavailable. Please restart the app so preload can initialize.",
+          isExecutionError: true,
+        },
+      ]);
+      return;
+    }
+
     const command = inputRef.current.trim();
     if (!command) return;
 
@@ -190,7 +224,7 @@ export default function Chat({ config, runTrigger, registerRun }: Props): React.
       ]);
       setRunning(false);
     }
-  }, [config, chatHistory]);
+  }, [config, chatHistory, hasBridge]);
 
   // Register this screen's run handler so the TopBar Run button can trigger it
   useEffect(() => {

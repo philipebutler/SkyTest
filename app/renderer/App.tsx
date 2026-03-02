@@ -92,7 +92,12 @@ export default function App(): React.ReactElement {
 
   return (
     <div style={styles.shell}>
-      <TopBar config={config} onConfigChange={handleConfigChange} onRun={handleRun} />
+      <TopBar
+        config={config}
+        onConfigChange={handleConfigChange}
+        onRun={handleRun}
+        onOpenSettings={() => setScreen("settings")}
+      />
       <div style={styles.body}>
         <Sidebar active={screen} onNavigate={setScreen} />
         <main style={styles.workspace}>

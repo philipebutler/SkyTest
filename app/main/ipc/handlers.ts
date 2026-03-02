@@ -9,6 +9,7 @@ import { TestCaseRepository } from "../storage/TestCaseRepository";
 import { RunRepository } from "../storage/RunRepository";
 import { RunExporter } from "../storage/RunExporter";
 import { CopilotAdapter } from "../llm/CopilotAdapter";
+import { buildChatCompletionsUrl } from "../llm/endpoint";
 import { LLMOrchestrator, type ChatSendPayload } from "../llm/LLMOrchestrator";
 import { validateDSL, validateDSLPolicy } from "../validation/dslValidator";
 import { PlaywrightExecutor } from "../runner/PlaywrightExecutor";
@@ -323,7 +324,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
 
       const start = Date.now();
       try {
-        const response = await fetch(`${endpoint}/chat/completions`, {
+        const response = await fetch(buildChatCompletionsUrl(endpoint), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -332,7 +333,6 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
           body: JSON.stringify({
             model,
             messages: [{ role: "user", content: "Reply with exactly: OK" }],
-            max_tokens: 5,
           }),
         });
         const latencyMs = Date.now() - start;

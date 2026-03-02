@@ -1,6 +1,7 @@
 import type { LLMAdapter } from "./LLMAdapter";
 import type { LLMRequest, LLMResponse } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
+import { buildChatCompletionsUrl } from "./endpoint";
 
 /** Shape of a non-streaming OpenAI chat completion response. */
 interface OpenAIChatCompletion {
@@ -43,7 +44,7 @@ export class CopilotAdapter implements LLMAdapter {
       };
     }
 
-    const response = await fetch(`${cfg.endpoint}/chat/completions`, {
+    const response = await fetch(buildChatCompletionsUrl(cfg.endpoint), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -87,7 +88,7 @@ export class CopilotAdapter implements LLMAdapter {
       };
     }
 
-    const response = await fetch(`${cfg.endpoint}/chat/completions`, {
+    const response = await fetch(buildChatCompletionsUrl(cfg.endpoint), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -42,6 +42,17 @@
 | Test card (open details) | button | `listTests` (on mount) | `app/main/ipc/handlers.ts` |
 | ▶ Run button | button | `executeTest` | `app/main/ipc/handlers.ts` |
 | 🗑 Delete button | button | `deleteTest` (after inline confirmation) | `app/main/ipc/handlers.ts` |
+| ＋ New Test | button | (local draft create, no IPC) | `app/renderer/screens/TestLibrary.tsx` |
+| ✨ Quick Wizard | button | (local draft create, no IPC) | `app/renderer/screens/TestLibrary.tsx` |
+| Save Test / Save Changes | button | `saveTest` / `updateTest` | `app/main/ipc/handlers.ts` |
+| Raw Save JSON | button | `updateTest` (strict) | `app/main/ipc/handlers.ts` |
+| Raw Save Draft | button | `updateTest` (`allowDraft=true`) | `app/main/ipc/handlers.ts` |
+| Visual validation preview | background invoke | `validateTestDraft` | `app/main/ipc/handlers.ts` |
+| Legacy Preview Conversion | button | `convertLegacyChatSteps` | `app/main/ipc/handlers.ts` |
+| Legacy Apply Preview | button | (local state apply, no IPC) | `app/renderer/screens/TestLibrary.tsx` |
+| Step reorder drag/drop | pointer interaction | (local reorder, no IPC) | `app/renderer/screens/TestLibrary.tsx` |
+| Step Move Up/Down | button | (local reorder, no IPC) | `app/renderer/screens/TestLibrary.tsx` |
+| Inline Fix / Fix All / Undo Fix | button | (local auto-fix, no IPC) | `app/renderer/screens/TestLibrary.tsx` |
 
 ---
 
@@ -102,6 +113,9 @@
 | `exportRun` | Run History ⬇ Export | `app/main/ipc/handlers.ts` | Writes `.md` + `.json` to user-chosen directory |
 | `saveTest` | Chat 💾 Save as Test, Record Save buttons | `app/main/ipc/handlers.ts` | Persists TestCase to `tests/` |
 | `listTests` | Test Library on mount / 🔄 Refresh | `app/main/ipc/handlers.ts` | Reads `tests/*.json` |
+| `updateTest` | Test Library Save JSON / Save Changes | `app/main/ipc/handlers.ts` | Supports strict update and draft-safe raw save |
+| `validateTestDraft` | Test Library Visual Builder validation banner | `app/main/ipc/handlers.ts` | Returns schema + policy diagnostics without execution |
+| `convertLegacyChatSteps` | Test Library legacy conversion preview | `app/main/ipc/handlers.ts` | Converts `action:"chat"` steps to canonical DSL for preview/apply |
 | `deleteTest` | Test Library 🗑 Delete | `app/main/ipc/handlers.ts` | Removes TestCase file from `tests/` |
 | `getSettings` | App init, Settings on mount | `app/main/ipc/handlers.ts` | Reads `settings.json` |
 | `saveSettings` | TopBar config changes, Settings Save | `app/main/ipc/handlers.ts` | Writes `settings.json` |

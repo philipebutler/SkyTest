@@ -13,6 +13,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ActionStep, Assertion, RefactoredRecording, TestCase } from "../../shared/types";
+import type { AppConfig } from "../App";
 
 // Typed IPC bridge exposed by preload.ts
 declare global {
@@ -79,7 +80,11 @@ function AssertionRow({
   );
 }
 
-export default function RecordScreen(): React.ReactElement {
+interface Props {
+  config: AppConfig;
+}
+
+export default function RecordScreen({ config }: Props): React.ReactElement {
   const [recordState, setRecordState] = useState<RecordState>("idle");
   const [steps, setSteps] = useState<ActionStep[]>([]);
   const [refactored, setRefactored] = useState<RefactoredRecording | null>(null);
@@ -112,12 +117,12 @@ export default function RecordScreen(): React.ReactElement {
     setRefactored(null);
     setEditedAssertions([]);
     try {
-      await window.skytest.invoke("record:start", { browser: "chromium" });
+      await window.skytest.invoke("record:start", { browser: config.browser });
       setRecordState("recording");
     } catch (err) {
       setError(`Failed to start recording: ${String(err)}`);
     }
-  }, []);
+  }, [config.browser]);
 
   const handleStop = useCallback(async () => {
     try {

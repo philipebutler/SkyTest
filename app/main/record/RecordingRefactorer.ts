@@ -12,6 +12,7 @@
 
 import { redactSecrets } from "../llm/credentialSanitizer";
 import type { LLMAdapter } from "../llm/LLMAdapter";
+import { ADVANCED_ACTION_VERBS, CORE_ACTION_VERBS } from "../../shared/types";
 import type { ActionStep, ActionVerb, LLMRequest, RefactoredRecording, ToolPolicy } from "../../shared/types";
 
 /** Draft test produced by the LLM that the user reviews before saving. */
@@ -19,9 +20,8 @@ export type { RefactoredRecording };
 
 /** All verbs permitted in a refactored recording. */
 const REFACTOR_VERBS: ActionVerb[] = [
-  "navigate", "click", "fill", "select", "check", "uncheck",
-  "hover", "wait", "waitForSelector", "waitForNavigation",
-  "scroll", "screenshot", "assert",
+  ...CORE_ACTION_VERBS,
+  ...ADVANCED_ACTION_VERBS,
 ];
 
 /**

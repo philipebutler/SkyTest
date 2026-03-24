@@ -2,7 +2,8 @@
  * Unit tests for the DSL Validator (Issue #7 / SPEC §6.3).
  */
 
-import { validateDSL, validateDSLPolicy } from "./dslValidator";
+import { normalizeDSLPlan, validateDSL, validateDSLPolicy } from "./dslValidator";
+import { ADVANCED_ACTION_VERBS, CORE_ACTION_VERBS } from "../../shared/types";
 import type { DSLPlan } from "../../shared/types";
 
 // ---------------------------------------------------------------------------
@@ -94,11 +95,7 @@ describe("validateDSL – unknown action verbs", () => {
   });
 
   it("accepts all valid action verbs", () => {
-    const verbs: DSLPlan["steps"][number]["action"][] = [
-      "navigate", "click", "fill", "select", "check", "uncheck",
-      "hover", "wait", "waitForSelector", "waitForNavigation",
-      "scroll", "screenshot", "assert",
-    ];
+    const verbs: DSLPlan["steps"][number]["action"][] = [...CORE_ACTION_VERBS, ...ADVANCED_ACTION_VERBS];
 
     for (const verb of verbs) {
       let step: DSLPlan["steps"][number];
@@ -110,6 +107,19 @@ describe("validateDSL – unknown action verbs", () => {
         case "assert":   step = { action: verb, selector: "#el" }; break;
         case "waitForNavigation":
         case "screenshot": step = { action: verb }; break;
+        case "keyboardType": step = { action: verb, params: { text: "hello" } }; break;
+        case "keyboardPress":
+        case "keyboardDown":
+        case "keyboardUp": step = { action: verb, params: { key: "Enter" } }; break;
+        case "frameSelect": step = { action: verb, params: { selector: "iframe" } }; break;
+        case "tabSwitch": step = { action: verb, params: { index: 0 } }; break;
+        case "uploadFile": step = { action: verb, selector: "input[type=file]", params: { files: "./fixtures/a.txt" } }; break;
+        case "networkWaitForRequest":
+        case "networkWaitForResponse": step = { action: verb, params: { urlIncludes: "/api" } }; break;
+        case "storageSet": step = { action: verb, params: { key: "token", value: "abc" } }; break;
+        case "storageRemove": step = { action: verb, params: { key: "token" } }; break;
+        case "cookieSet": step = { action: verb, params: { name: "sid", value: "1", domain: "example.com" } }; break;
+        case "cookieDelete": step = { action: verb, params: { name: "sid" } }; break;
         default:         step = { action: verb, selector: "#el" };
       }
       const result = validateDSL(makePlan({ steps: [step] }));
@@ -272,10 +282,20 @@ describe("validateDSLPolicy", () => {
         { action: "fill", selector: "#el", value: "v" },
         { action: "click", selector: "#btn" },
         { action: "screenshot" },
+        { action: "keyboardPress", params: { key: "Enter" } },
       ],
     });
     const result = validateDSLPolicy(plan, "full");
     expect(result.valid).toBe(true);
+  });
+
+  it("requires full policy for advanced verbs", () => {
+    const plan = makePlan({
+      steps: [{ action: "keyboardPress", params: { key: "Enter" } }],
+    });
+    const result = validateDSLPolicy(plan, "safe-write");
+    expect(result.valid).toBe(false);
+    expect(result.errors[0].message).toMatch(/not permitted|requires the "full" tool policy/i);
   });
 
   it("reports all policy violations, not just the first", () => {
@@ -291,5 +311,71 @@ describe("validateDSLPolicy", () => {
     // click and fill are blocked; navigate is allowed
     expect(result.errors).toHaveLength(2);
     expect(result.errors.map((e) => e.stepIndex)).toEqual([0, 1]);
+  });
+});
+
+describe("normalizeDSLPlan", () => {
+  it("maps verb + target aliases into canonical fields", () => {
+    const normalized = normalizeDSLPlan(
+      {
+        version: "1",
+        steps: [
+          { verb: "navigate", target: "https://example.com" },
+          { verb: "waitForSelector", target: "#ready" },
+        ],
+      },
+      "fallback"
+    ) as DSLPlan;
+
+    expect(normalized.intent).toBe("fallback");
+    expect(normalized.steps[0]).toMatchObject({ action: "navigate", value: "https://example.com" });
+    expect(normalized.steps[1]).toMatchObject({ action: "waitForSelector", selector: "#ready" });
+  });
+
+  it("maps navigate selector fallback into value", () => {
+    const normalized = normalizeDSLPlan(
+      {
+        version: "1",
+        intent: "x",
+        steps: [{ verb: "navigate", selector: "https://example.com" }],
+      },
+      "fallback"
+    ) as DSLPlan;
+
+    expect(normalized.steps[0]).toMatchObject({ action: "navigate", value: "https://example.com" });
+  });
+
+  it("maps goto alias and preserves params", () => {
+    const normalized = normalizeDSLPlan(
+      {
+        version: "1",
+        intent: "x",
+        steps: [{ verb: "goto", target: "https://example.com" }, { action: "keyboard.press", params: { key: "Enter" } }],
+      },
+      "fallback"
+    ) as DSLPlan;
+
+    expect(normalized.steps[0]).toMatchObject({ action: "navigate", value: "https://example.com" });
+    expect(normalized.steps[1]).toMatchObject({ action: "keyboardPress", params: { key: "Enter" } });
+  });
+
+  it("maps core fields from params for verb+params payloads", () => {
+    const normalized = normalizeDSLPlan(
+      {
+        version: "DSLPlan_v1",
+        intent: "google search",
+        steps: [
+          { verb: "navigate", params: { url: "https://www.google.com/" } },
+          { verb: "waitForSelector", params: { selector: "Search box", timeoutMs: 15000 } },
+          { verb: "fill", params: { selector: "Search box", text: "american cheese" } },
+        ],
+      },
+      "fallback"
+    ) as DSLPlan;
+
+    expect(normalized.version).toBe("1");
+    expect(normalized.steps[0]).toMatchObject({ action: "navigate", value: "https://www.google.com/" });
+    expect(normalized.steps[1]).toMatchObject({ action: "waitForSelector", selector: "Search box", timeout: 15000 });
+    expect(normalized.steps[2]).toMatchObject({ action: "fill", selector: "Search box", value: "american cheese" });
   });
 });

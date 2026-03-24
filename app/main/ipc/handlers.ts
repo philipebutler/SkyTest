@@ -3,7 +3,8 @@ import { dialog } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { chromium } from "playwright";
-import type { ActionStep, Assertion, BrowserType, DSLPlan, Run, RunConfig, SaveTestPayload, Settings, TestCase, ToolPolicy } from "../../shared/types";
+import { ADVANCED_ACTION_VERBS, CORE_ACTION_VERBS } from "../../shared/types";
+import type { ActionStep, Assertion, BrowserType, DSLPlan, LLMRequest, LLMResponse, Run, RunConfig, SaveTestPayload, Settings, TestCase, TestEditorValidationState, ToolPolicy } from "../../shared/types";
 import { StorageService } from "../storage/StorageService";
 import { TestCaseRepository } from "../storage/TestCaseRepository";
 import { RunRepository } from "../storage/RunRepository";
@@ -30,11 +31,33 @@ function sanitizeStep(raw: unknown): ActionStep | null {
   const source = raw as Record<string, unknown>;
   const action = typeof source.action === "string" ? source.action : "";
   if (!action) return null;
+
+  const params =
+    typeof source.params === "object" && source.params !== null
+      ? (source.params as Record<string, unknown>)
+      : undefined;
+  const topLevelValue = typeof source.value === "string" ? source.value : undefined;
+  const topLevelUrl = typeof source.url === "string" ? source.url : undefined;
+
+  let normalizedValue = topLevelValue;
+  if (!normalizedValue) {
+    if (typeof params?.value === "string") normalizedValue = params.value;
+    else if (typeof params?.text === "string") normalizedValue = params.text;
+    else if (typeof params?.url === "string") normalizedValue = params.url;
+    else if (topLevelUrl) normalizedValue = topLevelUrl;
+  }
+
+  let normalizedParams = params;
+  if (action === "keyboardPress" && !normalizedParams?.key && normalizedValue) {
+    normalizedParams = { ...(normalizedParams ?? {}), key: normalizedValue };
+  }
+
   return {
     action,
     selector: typeof source.selector === "string" ? source.selector : undefined,
-    value: typeof source.value === "string" ? source.value : undefined,
-    url: typeof source.url === "string" ? source.url : undefined,
+    value: normalizedValue,
+    url: topLevelUrl,
+    params: normalizedParams,
     timeout: typeof source.timeout === "number" ? source.timeout : undefined,
     optional: typeof source.optional === "boolean" ? source.optional : undefined,
   };
@@ -120,12 +143,53 @@ function sanitizeTestCaseUpdate(existing: TestCase, raw: unknown): TestCase {
     browser: nextBrowser,
     retryCount: nextRetryCount,
     retryMode: nextRetryMode,
+    uiDraft: undefined,
     createdAt: existing.createdAt,
     updatedAt: now,
   };
 }
 
-async function expandLegacyChatSteps(steps: ActionStep[], adapter: CopilotAdapter): Promise<ActionStep[]> {
+function buildDraftPreservingUpdate(existing: TestCase, rawJson: string, message: string): TestCase {
+  return {
+    ...existing,
+    uiDraft: {
+      isDraft: true,
+      invalidRawJson: rawJson,
+      parseError: message,
+      validationErrors: [message],
+      stagedAt: new Date().toISOString(),
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function applyRawTestUpdate(existing: TestCase, payload: { rawJson: string; allowDraft?: boolean }): TestCase {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload.rawJson);
+  } catch (err) {
+    const message = `Invalid JSON: ${err instanceof Error ? err.message : String(err)}`;
+    if (payload.allowDraft) {
+      return buildDraftPreservingUpdate(existing, payload.rawJson, message);
+    }
+    throw new Error(message);
+  }
+
+  try {
+    return sanitizeTestCaseUpdate(existing, parsed);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (payload.allowDraft) {
+      return buildDraftPreservingUpdate(existing, payload.rawJson, message);
+    }
+    throw err;
+  }
+}
+
+export async function expandLegacyChatSteps(
+  steps: ActionStep[],
+  adapter: { complete: (request: LLMRequest) => Promise<LLMResponse> }
+): Promise<ActionStep[]> {
   const expanded: ActionStep[] = [];
 
   for (const step of steps) {
@@ -144,21 +208,7 @@ async function expandLegacyChatSteps(steps: ActionStep[], adapter: CopilotAdapte
         "You are a test automation planner. Output only JSON that conforms to DSLPlan v1 with fields version, intent, and steps. Do not include markdown or explanations.",
       userMessage: prompt,
       toolPolicy: "full",
-      allowedVerbs: [
-        "navigate",
-        "click",
-        "fill",
-        "select",
-        "check",
-        "uncheck",
-        "hover",
-        "wait",
-        "waitForSelector",
-        "waitForNavigation",
-        "scroll",
-        "screenshot",
-        "assert",
-      ],
+      allowedVerbs: [...CORE_ACTION_VERBS, ...ADVANCED_ACTION_VERBS],
       environment: "default",
       baseUrl: "",
     });
@@ -386,15 +436,27 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
   // Channel: executeTest
   // Accepts a testId, loads the TestCase from disk, and executes it.
   // Full Playwright execution will be wired in subsequent issues.
-  ipcMain.handle("executeTest", async (_event, payload: { testId: string }): Promise<Run> => {
+  ipcMain.handle(
+    "executeTest",
+    async (
+      _event,
+      payload: {
+        testId: string;
+        environment?: string;
+        browser?: BrowserType;
+        headed?: boolean;
+        toolPolicy?: ToolPolicy;
+        authProfile?: string;
+      }
+    ): Promise<Run> => {
     const run: Run = {
       schemaVersion: "1",
       id: `run-${Date.now()}`,
       testId: payload.testId,
-      environment: "default",
-      browser: "chromium",
-      headed: false,
-      toolPolicy: "read-only",
+      environment: payload.environment ?? "default",
+      browser: payload.browser ?? "chromium",
+      headed: payload.headed ?? false,
+      toolPolicy: payload.toolPolicy ?? "read-only",
       status: "running",
       stepResults: [],
       artifacts: [],
@@ -414,13 +476,17 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
         executableSteps = await expandLegacyChatSteps(testCase.steps, new CopilotAdapter());
       }
 
-      // Use browser from TestCase metadata if available, otherwise default to chromium
-      const browserToUse: BrowserType = testCase.browser ?? "chromium";
+      // Use explicit run browser when provided, otherwise TestCase browser, then chromium.
+      const browserToUse: BrowserType = payload.browser ?? testCase.browser ?? "chromium";
       run.browser = browserToUse;
-      const dslPlan: DSLPlan = { version: "1", intent: payload.testId, steps: executableSteps };
+      const normalizedPlan = normalizeDSLPlan({ version: "1", intent: payload.testId, steps: executableSteps }, payload.testId) as DSLPlan;
+      const dslPlan: DSLPlan = { ...normalizedPlan, intent: payload.testId };
       const storage = StorageService.getInstance();
-      // Reuse auth session for the test's environment when a saved state exists (Issue #13)
-      const storageStatePath = storage.getStorageStatePath(run.environment) ?? undefined;
+      // Reuse auth session using selected profile when provided, otherwise environment profile.
+      const authProfileName = payload.authProfile && payload.authProfile !== "none"
+        ? payload.authProfile
+        : run.environment;
+      const storageStatePath = storage.getStorageStatePath(authProfileName) ?? undefined;
       // Use retry settings from the TestCase if set, otherwise fall back to global settings (Issue #23)
       const settings = storage.getSettings();
       const retryCount = testCase.retryCount ?? settings.retryCount;
@@ -459,7 +525,8 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
     run.finishedAt = new Date().toISOString();
     runRepo.save(run);
     return run;
-  });
+  }
+  );
 
   // Channel: saveTest
   // Accepts a test name and chat-sourced steps, persists as a TestCase in tests/.
@@ -476,6 +543,7 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
         .filter((step): step is ActionStep => step !== null),
       assertions: payload.assertions ?? [],
       browser: payload.browser,
+      uiDraft: payload.uiDraft,
       createdAt: now,
       updatedAt: now,
     };
@@ -493,23 +561,57 @@ export function registerIpcHandlers(ipcMain: IpcMain): void {
   // Replaces a TestCase by ID using raw JSON edited from the Test Library.
   ipcMain.handle(
     "updateTest",
-    async (_event, payload: { testId: string; rawJson: string }): Promise<TestCase> => {
+    async (_event, payload: { testId: string; rawJson: string; allowDraft?: boolean }): Promise<TestCase> => {
       const testRepo = new TestCaseRepository(StorageService.getInstance().testsDir);
       const existing = testRepo.load(payload.testId);
       if (!existing) {
         throw new Error(`Test not found: ${payload.testId}`);
       }
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(payload.rawJson);
-      } catch (err) {
-        throw new Error(`Invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      const updated = sanitizeTestCaseUpdate(existing, parsed);
+      const updated = applyRawTestUpdate(existing, payload);
       testRepo.save(updated);
       return updated;
+    }
+  );
+
+  // Channel: validateTestDraft
+  // Validates builder steps against schema and tool policy without execution.
+  ipcMain.handle(
+    "validateTestDraft",
+    async (
+      _event,
+      payload: { steps: ActionStep[]; toolPolicy: ToolPolicy }
+    ): Promise<TestEditorValidationState> => {
+      const plan: DSLPlan = {
+        version: "1",
+        intent: "Builder validation preview",
+        steps: payload.steps ?? [],
+      };
+
+      const schema = validateDSL(plan);
+      const policy = schema.valid ? validateDSLPolicy(plan, payload.toolPolicy) : { valid: false, errors: [] };
+
+      return {
+        schemaValid: schema.valid,
+        schemaErrors: schema.errors,
+        policyValid: schema.valid ? policy.valid : false,
+        policyErrors: schema.valid ? policy.errors : [],
+      };
+    }
+  );
+
+  // Channel: convertLegacyChatSteps
+  // Converts legacy action:"chat" steps to canonical executable steps for preview/apply in UI.
+  ipcMain.handle(
+    "convertLegacyChatSteps",
+    async (_event, payload: { steps: ActionStep[] }): Promise<{ converted: boolean; steps: ActionStep[] }> => {
+      const inputSteps = payload.steps ?? [];
+      if (!inputSteps.some((step) => step.action === LEGACY_CHAT_ACTION)) {
+        return { converted: false, steps: inputSteps };
+      }
+
+      const convertedSteps = await expandLegacyChatSteps(inputSteps, new CopilotAdapter());
+      return { converted: true, steps: convertedSteps };
     }
   );
 

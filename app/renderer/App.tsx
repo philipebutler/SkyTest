@@ -30,6 +30,7 @@ export default function App(): React.ReactElement {
   const [screen, setScreen] = useState<Screen>("chat");
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const runEnabled = screen === "chat" || screen === "tests";
 
   // Load persisted settings on mount and initialise config from last-used values (Issue #3)
   useEffect(() => {
@@ -77,13 +78,18 @@ export default function App(): React.ReactElement {
   // (used by screens other than Chat in future milestones)
   const screenRunRef = useRef<(() => void) | null>(null);
 
+  useEffect(() => {
+    screenRunRef.current = null;
+  }, [screen]);
+
   const handleRun = useCallback(() => {
+    if (!runEnabled) return;
     if (screenRunRef.current) {
       screenRunRef.current();
     } else {
       handleTopBarRun();
     }
-  }, [handleTopBarRun]);
+  }, [handleTopBarRun, runEnabled]);
 
   // Stable callback for the active screen to register its run handler
   const registerRun = useCallback((fn: () => void) => {
@@ -97,6 +103,8 @@ export default function App(): React.ReactElement {
         onConfigChange={handleConfigChange}
         onRun={handleRun}
         onOpenSettings={() => setScreen("settings")}
+        runEnabled={runEnabled}
+        runDisabledReason="Run is available on Chat and Tests screens."
       />
       <div style={styles.body}>
         <Sidebar active={screen} onNavigate={setScreen} />
@@ -104,9 +112,11 @@ export default function App(): React.ReactElement {
           {screen === "chat" && (
           <Chat config={config} runTrigger={runTrigger} registerRun={registerRun} />
           )}
-          {screen === "tests" && <TestLibrary config={config} />}
+          {screen === "tests" && (
+            <TestLibrary config={config} runTrigger={runTrigger} registerRun={registerRun} />
+          )}
           {screen === "runs" && <RunHistory />}
-          {screen === "record" && <RecordScreen />}
+          {screen === "record" && <RecordScreen config={config} />}
           {screen === "settings" && <SettingsScreen />}
         </main>
       </div>

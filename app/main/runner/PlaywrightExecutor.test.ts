@@ -65,8 +65,31 @@ describe("PlaywrightExecutor – headed/headless mode (Issue #10)", () => {
       evaluate: jest.fn(),
       screenshot: jest.fn(),
       waitForFunction: jest.fn(),
+      keyboard: {
+        type: jest.fn(),
+        press: jest.fn(),
+        down: jest.fn(),
+        up: jest.fn(),
+      },
+      context: jest.fn(),
+      waitForEvent: jest.fn(),
+      frame: jest.fn(),
+      $: jest.fn(),
+      title: jest.fn(),
+      url: jest.fn(),
+      close: jest.fn(),
+      setInputFiles: jest.fn(),
+      once: jest.fn(),
     };
-    const mockContext = { newPage: jest.fn().mockResolvedValue(mockPage), close: jest.fn() };
+    const mockContext = {
+      newPage: jest.fn().mockResolvedValue(mockPage),
+      close: jest.fn(),
+      pages: jest.fn().mockReturnValue([mockPage]),
+      addCookies: jest.fn(),
+      clearCookies: jest.fn(),
+      cookies: jest.fn().mockResolvedValue([]),
+    };
+    mockPage.context.mockReturnValue(mockContext);
     const mockBrowser = { newContext: jest.fn().mockResolvedValue(mockContext), close: jest.fn() };
     launchSpy = jest.fn().mockResolvedValue(mockBrowser);
     jest.spyOn(executor, "getLauncher").mockReturnValue({ launch: launchSpy } as never);
@@ -91,7 +114,7 @@ describe("PlaywrightExecutor – headed/headless mode (Issue #10)", () => {
 
 /** Builds a fresh mock page + browser hierarchy and wires it into the executor. */
 function setupExecutorWithMockPage(executor: PlaywrightExecutor): Record<string, jest.Mock> {
-  const mockPage: Record<string, jest.Mock> = {
+  const mockPage: Record<string, unknown> = {
     goto: jest.fn().mockResolvedValue(undefined),
     click: jest.fn().mockResolvedValue(undefined),
     fill: jest.fn().mockResolvedValue(undefined),
@@ -105,11 +128,34 @@ function setupExecutorWithMockPage(executor: PlaywrightExecutor): Record<string,
     evaluate: jest.fn().mockResolvedValue(undefined),
     screenshot: jest.fn().mockResolvedValue(undefined),
     waitForFunction: jest.fn().mockResolvedValue(undefined),
+    waitForEvent: jest.fn().mockResolvedValue(undefined),
+    frame: jest.fn().mockReturnValue(null),
+    $: jest.fn().mockResolvedValue(null),
+    title: jest.fn().mockResolvedValue("tab"),
+    url: jest.fn().mockReturnValue("https://example.com"),
+    close: jest.fn().mockResolvedValue(undefined),
+    setInputFiles: jest.fn().mockResolvedValue(undefined),
+    once: jest.fn(),
+    keyboard: {
+      type: jest.fn().mockResolvedValue(undefined),
+      press: jest.fn().mockResolvedValue(undefined),
+      down: jest.fn().mockResolvedValue(undefined),
+      up: jest.fn().mockResolvedValue(undefined),
+    },
+    context: jest.fn(),
   };
-  const mockContext = { newPage: jest.fn().mockResolvedValue(mockPage), close: jest.fn() };
+  const mockContext = {
+    newPage: jest.fn().mockResolvedValue(mockPage),
+    close: jest.fn(),
+    pages: jest.fn().mockReturnValue([mockPage]),
+    addCookies: jest.fn().mockResolvedValue(undefined),
+    clearCookies: jest.fn().mockResolvedValue(undefined),
+    cookies: jest.fn().mockResolvedValue([]),
+  };
+  (mockPage.context as jest.Mock).mockReturnValue(mockContext);
   const mockBrowser = { newContext: jest.fn().mockResolvedValue(mockContext), close: jest.fn() };
   jest.spyOn(executor, "getLauncher").mockReturnValue({ launch: jest.fn().mockResolvedValue(mockBrowser) } as never);
-  return mockPage;
+  return mockPage as Record<string, jest.Mock>;
 }
 
 describe("PlaywrightExecutor – sequential execution (Issue #11)", () => {
@@ -577,5 +623,113 @@ describe("PlaywrightExecutor – per-test retry (Issue #23)", () => {
     const result = await executor.execute(plan, "chromium", false, "/tmp", undefined, undefined, 2, "test");
 
     expect(result.stepResults[0].status).toBe("failed");
+  });
+});
+
+describe("PlaywrightExecutor – advanced action domains", () => {
+  it("executes keyboard actions", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "keyboard",
+      steps: [
+        { action: "keyboardType", params: { text: "hello" } },
+        { action: "keyboardPress", params: { key: "Enter" } },
+      ],
+    };
+
+    await executor.execute(plan, "chromium", false, "/tmp");
+
+    expect((mockPage.keyboard as any).type).toHaveBeenCalledWith("hello", { delay: undefined });
+    expect((mockPage.keyboard as any).press).toHaveBeenCalledWith("Enter", { delay: undefined });
+  });
+
+  it("executes tab and frame actions", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+    const mockFrame = {
+      click: jest.fn().mockResolvedValue(undefined),
+      fill: jest.fn().mockResolvedValue(undefined),
+      selectOption: jest.fn().mockResolvedValue(undefined),
+      check: jest.fn().mockResolvedValue(undefined),
+      uncheck: jest.fn().mockResolvedValue(undefined),
+      hover: jest.fn().mockResolvedValue(undefined),
+      waitForSelector: jest.fn().mockResolvedValue(undefined),
+      evaluate: jest.fn().mockResolvedValue(undefined),
+      setInputFiles: jest.fn().mockResolvedValue(undefined),
+    };
+    mockPage.frame.mockReturnValue(mockFrame as never);
+
+    const context = mockPage.context();
+    const secondPage = { ...mockPage, title: jest.fn().mockResolvedValue("second"), url: jest.fn().mockReturnValue("https://second.example") };
+    context.pages.mockReturnValue([mockPage, secondPage]);
+    context.newPage.mockResolvedValue(secondPage);
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "frame and tabs",
+      steps: [
+        { action: "frameSelect", params: { name: "frame-1" } },
+        { action: "click", selector: "#inside-frame" },
+        { action: "frameClear" },
+        { action: "tabNew", params: { url: "https://new.example" } },
+        { action: "tabSwitch", params: { index: 0 } },
+      ],
+    };
+
+    await executor.execute(plan, "chromium", false, "/tmp");
+
+    expect(mockFrame.click).toHaveBeenCalled();
+    expect(context.newPage).toHaveBeenCalled();
+  });
+
+  it("executes upload, download, network, storage, and cookie actions", async () => {
+    const executor = new PlaywrightExecutor();
+    const mockPage = setupExecutorWithMockPage(executor);
+
+    const downloadMock = {
+      suggestedFilename: jest.fn().mockReturnValue("report.csv"),
+      saveAs: jest.fn().mockResolvedValue(undefined),
+    };
+
+    mockPage.waitForEvent.mockImplementation((event: string) => {
+      if (event === "download") return Promise.resolve(downloadMock);
+      if (event === "request") {
+        return Promise.resolve({ url: () => "https://example.com/api", method: () => "GET" });
+      }
+      if (event === "response") {
+        return Promise.resolve({ url: () => "https://example.com/api", status: () => 200 });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const context = mockPage.context();
+    context.cookies.mockResolvedValue([{ name: "sid", value: "x", domain: "example.com", path: "/" }]);
+
+    const plan: DSLPlan = {
+      version: "1",
+      intent: "advanced io",
+      steps: [
+        { action: "uploadFile", selector: "input[type=file]", params: { files: ["./fixtures/a.txt"] } },
+        { action: "downloadExpect" },
+        { action: "networkWaitForRequest", params: { urlIncludes: "/api" } },
+        { action: "networkWaitForResponse", params: { urlIncludes: "/api", status: 200 } },
+        { action: "storageSet", params: { key: "token", value: "abc" } },
+        { action: "cookieSet", params: { name: "sid", value: "x", domain: "example.com" } },
+        { action: "cookieDelete", params: { name: "sid" } },
+        { action: "cookieClear" },
+      ],
+    };
+
+    const result = await executor.execute(plan, "chromium", false, "/tmp");
+
+    expect(mockPage.setInputFiles).toHaveBeenCalled();
+    expect(downloadMock.saveAs).toHaveBeenCalled();
+    expect(mockPage.evaluate).toHaveBeenCalled();
+    expect(context.addCookies).toHaveBeenCalled();
+    expect(context.clearCookies).toHaveBeenCalled();
+    expect(result.artifacts.some((a) => a.type === "download")).toBe(true);
   });
 });

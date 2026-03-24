@@ -110,7 +110,7 @@ No raw Node.js APIs or file system paths are ever exposed to the renderer.
       Sidebar.tsx            # Screen navigation
     /screens
       Chat.tsx               # Chat transcript, LLM streaming, Save as Test
-      TestLibrary.tsx        # Test list, search, tags, detail panel, run inline
+      TestLibrary.tsx        # Test list, visual builder, quick wizard presets, raw JSON editor, run inline
       RunHistory.tsx         # Run list, filters, step timeline, export
       Record.tsx             # Record start/stop, refactor, save
       Settings.tsx           # All persistent settings, auth session update
@@ -254,6 +254,8 @@ All renderer ↔ main communication uses the `window.skytest` bridge.
 | `getRunHistory` | `{}` | `Run[]` | List all Run records |
 | `saveTest` | `SaveTestPayload` | `TestCase` | Save a new TestCase |
 | `updateTest` | `{ testId: string; rawJson: string }` | `TestCase` | Update an existing TestCase from raw JSON |
+| `validateTestDraft` | `{ steps: ActionStep[]; toolPolicy: ToolPolicy }` | `TestEditorValidationState` | Validate schema + tool policy for builder preview without execution |
+| `convertLegacyChatSteps` | `{ steps: ActionStep[] }` | `{ converted: boolean; steps: ActionStep[] }` | Preview-convert legacy `action:"chat"` steps |
 | `listTests` | `{}` | `TestCase[]` | List all TestCase records |
 | `deleteTest` | `{ testId: string }` | `void` | Delete a TestCase |
 | `exportRun` | `{ runId: string }` | `{ markdown: string; json: string }` | Export a run |
@@ -283,6 +285,25 @@ Registers all `ipcMain.handle()` and `ipcMain.on()` listeners. This is the singl
 1. Reads payload from the IPC event.
 2. Delegates to the appropriate service (orchestrator, executor, repository, etc.).
 3. Returns a serialisable result or throws a typed error.
+
+### `renderer/screens/TestLibrary.tsx`
+
+The Tests screen now provides three editing modes in the detail panel:
+
+- **Visual Builder**: schema-driven step and assertion editing with inline validation.
+- **Quick Wizard**: guided test creation for non-DSL users, including richer presets for common flows (search and login).
+- **Raw JSON**: direct JSON editing for advanced users.
+
+Visual Builder step cards support drag-and-drop reordering in the renderer before persistence. Save and run actions continue using existing IPC channels (`saveTest`, `updateTest`, `executeTest`, `executeDSLPlan` for drafts).
+
+Validation UX in Visual Builder includes:
+
+- Live validation banner (ready/error state)
+- Per-error one-click **Fix** suggestions
+- Banner-level **Fix All** for common validation issues
+- **Undo Fix** to revert the most recent auto-fix operation
+
+Raw JSON mode supports a draft-safe update path: invalid/raw edits can be saved as draft metadata (`TestCase.uiDraft`) while preserving current executable `steps` until a valid apply is performed.
 
 ### `llm/LLMAdapter.ts`
 
@@ -490,7 +511,7 @@ Tool policies are enforced at two layers:
 |--------|----------------|
 | `read-only` | `navigate`, `screenshot`, `assert`, `wait`, `waitForSelector`, `waitForNavigation` |
 | `safe-write` | All of `read-only` plus `click`, `fill`, `select`, `check`, `uncheck`, `hover`, `scroll` |
-| `full` | Same as `safe-write` (reserved for future destructive actions) |
+| `full` | All verbs, including advanced domains: keyboard, frames, tabs, dialogs, uploads/downloads, network waits, storage, cookies |
 
 ---
 

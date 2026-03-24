@@ -1,6 +1,7 @@
 import type { WebContents } from "electron";
 import type { LLMAdapter } from "./LLMAdapter";
 import { redactSecrets } from "./credentialSanitizer";
+import { ADVANCED_ACTION_VERBS, CORE_ACTION_VERBS } from "../../shared/types";
 import type {
   ActionVerb,
   ChatHistoryEntry,
@@ -14,14 +15,8 @@ import type {
 /** Verbs permitted under each tool policy (SPEC §8 / §11.2). */
 const POLICY_VERBS: Record<ToolPolicy, ActionVerb[]> = {
   "read-only": ["navigate", "screenshot", "assert", "wait", "waitForSelector", "waitForNavigation"],
-  "safe-write": [
-    "navigate", "click", "fill", "select", "check", "uncheck", "hover",
-    "wait", "waitForSelector", "waitForNavigation", "scroll", "screenshot", "assert",
-  ],
-  full: [
-    "navigate", "click", "fill", "select", "check", "uncheck", "hover",
-    "wait", "waitForSelector", "waitForNavigation", "scroll", "screenshot", "assert",
-  ],
+  "safe-write": [...CORE_ACTION_VERBS],
+  full: [...CORE_ACTION_VERBS, ...ADVANCED_ACTION_VERBS],
 };
 
 /** System prompt template (SPEC §11.3). */
@@ -32,7 +27,7 @@ Rules:
 - Output only valid JSON conforming to DSLPlan v1, or a clarifying question prefixed with CLARIFY:
 - Do not emit code, markdown, or explanation
 - Only use verbs from this list: ${allowedVerbs.join(", ")}
-- DSL does not support a "press" action. For intents like "press enter" or "submit", represent submission with supported actions (for example clicking a submit/search button) when permitted by tool policy.
+- For advanced verbs, put structured arguments under step.params as JSON object fields
 - If intent is ambiguous, output CLARIFY: followed by your question
 - The base URL for this session is: ${redactSecrets(baseUrl)}
 - Do not guess at selectors; use descriptive selectors the user would recognize`;

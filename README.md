@@ -9,7 +9,7 @@
 | Feature | Description |
 |---------|-------------|
 | 💬 **Chat-driven automation** | Type a plain-English command; the LLM produces a validated DSL plan and Playwright runs it |
-| 📚 **Test Library** | Save, search, tag, manually edit raw JSON, and re-run test cases from a local JSON store |
+| 📚 **Test Library** | Visual Builder + Quick Wizard + Raw JSON with draft-safe invalid edit staging and legacy chat-step conversion preview |
 | 🕰 **Run History** | Browse every past run with step timelines, assertion results and failure screenshots |
 | 🎙 **Record Mode** | Capture clicks and form fills in a live browser, then let the LLM clean the recording into a reusable test |
 | 🔒 **Tool Policies** | Three safety levels (`read-only`, `safe-write`, `full`) control which browser actions are permitted |
@@ -18,7 +18,7 @@
 | 🤖 **CI Runner** | Headless CLI entry point that outputs JUnit XML or JSON – no UI required |
 | 📤 **Export** | Export any run as Markdown or JSON from the Run History screen |
 
-Legacy note: previously saved Chat tests that used `action: "chat"` are automatically converted to executable DSL steps when they are run.
+Legacy note: previously saved Chat tests that used `action: "chat"` are automatically converted to executable DSL steps when they are run, and can be preview-converted from the Tests UI before apply.
 
 ---
 

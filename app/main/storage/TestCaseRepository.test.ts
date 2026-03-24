@@ -134,6 +134,23 @@ describe("TestCaseRepository – load (Issue #15)", () => {
     expect(loaded!.steps).toHaveLength(2);
     expect(loaded!.assertions).toHaveLength(1);
   });
+
+  it("preserves uiDraft metadata on round-trip", () => {
+    const tc = makeTestCase({
+      id: "test-draft-roundtrip",
+      uiDraft: {
+        isDraft: true,
+        invalidRawJson: "{ bad",
+        parseError: "Invalid JSON",
+        validationErrors: ["Invalid JSON"],
+        stagedAt: new Date().toISOString(),
+      },
+    });
+    repo.save(tc);
+    const loaded = repo.load("test-draft-roundtrip");
+    expect(loaded?.uiDraft?.isDraft).toBe(true);
+    expect(loaded?.uiDraft?.invalidRawJson).toBe("{ bad");
+  });
 });
 
 describe("TestCaseRepository – list (Issue #15)", () => {

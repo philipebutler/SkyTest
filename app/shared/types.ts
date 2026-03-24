@@ -1,23 +1,54 @@
-export type ActionVerb =
-  | "navigate"
-  | "click"
-  | "fill"
-  | "select"
-  | "check"
-  | "uncheck"
-  | "hover"
-  | "wait"
-  | "waitForSelector"
-  | "waitForNavigation"
-  | "scroll"
-  | "screenshot"
-  | "assert";
+export const CORE_ACTION_VERBS = [
+  "navigate",
+  "click",
+  "fill",
+  "select",
+  "check",
+  "uncheck",
+  "hover",
+  "wait",
+  "waitForSelector",
+  "waitForNavigation",
+  "scroll",
+  "screenshot",
+  "assert",
+] as const;
+
+export const ADVANCED_ACTION_VERBS = [
+  "keyboardType",
+  "keyboardPress",
+  "keyboardDown",
+  "keyboardUp",
+  "frameSelect",
+  "frameClear",
+  "tabNew",
+  "tabSwitch",
+  "tabClose",
+  "dialogExpect",
+  "dialogAccept",
+  "dialogDismiss",
+  "uploadFile",
+  "downloadExpect",
+  "networkWaitForRequest",
+  "networkWaitForResponse",
+  "storageSet",
+  "storageRemove",
+  "storageClear",
+  "cookieSet",
+  "cookieDelete",
+  "cookieClear",
+] as const;
+
+export const ALL_ACTION_VERBS = [...CORE_ACTION_VERBS, ...ADVANCED_ACTION_VERBS] as const;
+
+export type ActionVerb = (typeof ALL_ACTION_VERBS)[number];
 
 export interface ActionStep {
   action: string;
   selector?: string;
   value?: string;
   url?: string;
+  params?: Record<string, unknown>;
   timeout?: number;
   optional?: boolean;
 }
@@ -80,6 +111,26 @@ export interface Assertion {
   count?: number;
 }
 
+/** UI editor mode for the Test Library builder workflows. */
+export type TestEditorMode = "visual" | "wizard" | "raw";
+
+/** Draft metadata for invalid/raw edits that should not overwrite executable steps. */
+export interface TestDraftMetadata {
+  isDraft: boolean;
+  invalidRawJson?: string;
+  parseError?: string;
+  validationErrors?: string[];
+  stagedAt: string;
+}
+
+/** Validation summary returned to builder UI for pre-run diagnostics. */
+export interface TestEditorValidationState {
+  schemaValid: boolean;
+  schemaErrors: Array<{ stepIndex: number; message: string }>;
+  policyValid: boolean;
+  policyErrors: Array<{ stepIndex: number; message: string }>;
+}
+
 export interface TestCase {
   schemaVersion: string;
   id: string;
@@ -94,6 +145,8 @@ export interface TestCase {
   retryCount?: number;
   /** Whether to retry per step or per test (Issue #23). */
   retryMode?: "step" | "test";
+  /** Optional UI draft metadata for preserving invalid/raw edits safely. */
+  uiDraft?: TestDraftMetadata;
   createdAt: string;
   updatedAt: string;
 }
@@ -127,7 +180,7 @@ export interface AssertionResult {
 
 export interface Artifact {
   id: string;
-  type: "screenshot" | "log" | "html" | "har";
+  type: "screenshot" | "log" | "html" | "har" | "download";
   path: string;
   createdAt: string;
   stepIndex?: number;
@@ -196,15 +249,30 @@ export interface SaveTestPayload {
   assertions?: Assertion[];
   /** Browser that was active when the test was saved (Issue #9). */
   browser?: BrowserType;
+  /** Optional UI draft metadata when persisting an invalid/raw edit safely. */
+  uiDraft?: TestDraftMetadata;
 }
 
 // Typed IPC contracts (SPEC §6.1)
 export type IpcRequest =
   | { type: "ExecuteCommand"; payload: RunConfig }
-  | { type: "ExecuteTest"; payload: { testId: string } }
+  | {
+      type: "ExecuteTest";
+      payload: {
+        testId: string;
+        environment?: string;
+        browser?: BrowserType;
+        headed?: boolean;
+        toolPolicy?: ToolPolicy;
+        authProfile?: string;
+      };
+    }
+  | { type: "ExecuteDSLPlan"; payload: { plan: unknown; intent?: string; environment: string; browser: BrowserType; headed: boolean; toolPolicy: ToolPolicy } }
   | { type: "GetRunHistory"; payload: Record<string, never> }
   | { type: "SaveTest"; payload: SaveTestPayload }
-  | { type: "UpdateTest"; payload: { testId: string; rawJson: string } }
+  | { type: "UpdateTest"; payload: { testId: string; rawJson: string; allowDraft?: boolean } }
+  | { type: "ValidateTestDraft"; payload: { steps: ActionStep[]; toolPolicy: ToolPolicy } }
+  | { type: "ConvertLegacyChatSteps"; payload: { steps: ActionStep[] } }
   | { type: "ListTests"; payload: Record<string, never> }
   | { type: "DeleteTest"; payload: { testId: string } }
   | { type: "ExportRun"; payload: { runId: string } }
@@ -215,6 +283,8 @@ export type IpcRequest =
 export type IpcChannel =
   | "executeCommand"
   | "executeDSLPlan"
+  | "validateTestDraft"
+  | "convertLegacyChatSteps"
   | "executeTest"
   | "getRunHistory"
   | "saveTest"

@@ -7,6 +7,8 @@ interface Props {
   onConfigChange: (cfg: AppConfig) => void;
   onRun: () => void;
   onOpenSettings: () => void;
+  runEnabled?: boolean;
+  runDisabledReason?: string;
 }
 
 const BROWSERS: BrowserType[] = ["chromium", "firefox", "webkit"];
@@ -17,6 +19,8 @@ export default function TopBar({
   onConfigChange,
   onRun,
   onOpenSettings,
+  runEnabled = true,
+  runDisabledReason,
 }: Props): React.ReactElement {
   // Auth profiles are loaded from the auth/ directory (Issue #13).
   // The list always includes "none" (no auth) as the default option.
@@ -114,7 +118,15 @@ export default function TopBar({
         </select>
       </label>
 
-      <button style={styles.runButton} onClick={onRun} title="Run with current configuration">
+      <button
+        style={{
+          ...styles.runButton,
+          ...(!runEnabled ? styles.buttonDisabled : {}),
+        }}
+        onClick={onRun}
+        title={runEnabled ? "Run with current configuration" : runDisabledReason ?? "Run unavailable on this screen"}
+        disabled={!runEnabled}
+      >
         ▶ Run
       </button>
 
@@ -184,6 +196,11 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.3rem 0.9rem",
     fontSize: "0.8rem",
     fontWeight: "bold",
+  },
+  buttonDisabled: {
+    backgroundColor: "#555",
+    color: "#999",
+    cursor: "not-allowed",
   },
   iconButton: {
     backgroundColor: "#2a2a2a",
